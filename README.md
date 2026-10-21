@@ -2,7 +2,7 @@
 
 https://github.com/user-attachments/assets/47bc945d-6377-4df5-80a6-93bd219fd1b6
 
-# rex-nvim
+# rex.nvim
 
 Code-review comments in Neovim, sent to the coding agent running next to you
 in Rex. Comment lines or a selection like a code review,
@@ -26,7 +26,7 @@ nvim ≥ 0.10 · `rex` on PATH · nvim running inside a Rex session
 With your plugin manager (e.g. lazy.nvim):
 
 ```lua
-{ "rawnly/rex-nvim", opts = {} }
+{ "rawnly/rex.nvim", opts = {} }
 ```
 
 ## Annotations

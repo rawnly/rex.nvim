@@ -13,7 +13,7 @@ through Rex (OSC 7501), is a candidate. Text is pasted with `rex send`; a
 submit also presses Enter with `rex send-key`.
 
 Links:
-- Repository: https://github.com/rawnly/rex-nvim
+- Repository: https://github.com/rawnly/rex.nvim
 
 Table of contents:
 
@@ -67,7 +67,7 @@ INSTALLATION                                           *rex-nvim-installation*
 Install with your plugin manager. With lazy.nvim:
 
 >lua
-  { "rawnly/rex-nvim", opts = {} }
+  { "rawnly/rex.nvim", opts = {} }
 <
 
 The plugin registers the |rex-nvim-commands| command when it loads, so
@@ -75,7 +75,7 @@ lazy.nvim can lazy-load it and declare the keymaps in the spec:
 
 >lua
   {
-    "rawnly/rex-nvim",
+    "rawnly/rex.nvim",
     cmd = { "Rex" },
     keys = {
       { "<leader>a", "", desc = "+AI", mode = { "n", "x" } },

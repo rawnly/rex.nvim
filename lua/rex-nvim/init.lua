@@ -14,9 +14,13 @@ M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true }
 local own_maps = {}
 
 local function map(mode, lhs, rhs, desc)
+  -- Key own_maps by the raw keys, not lhs, so "<leader>a" and "<Space>a"
+  -- (with mapleader = " ") are the same map.
   local keys = vim.api.nvim_replace_termcodes(lhs, true, true, true)
   local id = mode .. keys
   local existing = vim.fn.maparg(keys, mode, false, true)
+  -- rhs is a new closure on every setup(), so compare against the one we
+  -- stored last time: if the map still runs it, nobody has remapped the keys.
   local ours = own_maps[id] ~= nil and existing.callback == own_maps[id]
   if not vim.tbl_isempty(existing) and not ours then
     vim.notify("rex-nvim: not overriding existing map " .. lhs, vim.log.levels.WARN)
