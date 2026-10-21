@@ -3,7 +3,7 @@ local exec_mod = require("rex-nvim.exec")
 
 -- Foreground programs treated as agents even when they report no status of
 -- their own. Anything that reports a status (OSC 7501) counts too.
-M.known = { "claude", "codex", "pi", "opencode", "gemini", "aider", "amp", "cursor-agent", "crush", "goose", "qwen" }
+M.known = { "claude", "codex", "pi", "opencode", "gemini", "aider", "amp", "cursor-agent", "crush", "goose", "qwen", "vibe" }
 
 local function failure(what, r)
   return what .. " failed: " .. (r.stderr ~= "" and vim.trim(r.stderr) or ("exit " .. r.code))
