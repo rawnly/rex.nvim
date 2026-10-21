@@ -394,3 +394,7 @@ T.test("init: ref_line and ref_selection resolve their own span", function()
   T.eq(sent[1], "span.lua:3 ", "ref_line targets the cursor line")
   T.eq(sent[2], "span.lua:2-4 ", "ref_selection targets the visual marks")
 end)
+
+T.test("init: agent_scope defaults to session", function()
+  T.eq(hn.config.agent_scope, "session")
+end)

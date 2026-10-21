@@ -9,6 +9,11 @@ M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true,
   -- Command (or { cmd, split, ratio }) to open in a new unfocused split when
   -- there is no agent in the session to send to.
   preferred_agent = nil,
+  -- Log timings to an in-memory buffer; view with `:Rex debug log`.
+  debug = false,
+  -- Where to look for agents: "session" (default; a lone agent in another tab
+  -- is still used) or "tab" (only agents in this nvim's tab).
+  agent_scope = "session",
 }
 
 -- Callback of each default keymap this plugin set, by mode and keys. setup()
@@ -36,6 +41,7 @@ end
 
 function M.setup(config)
   M.config = vim.tbl_deep_extend("force", M.config, config or {})
+  if M.config.debug then require("rex-nvim.debug").set(true) end
   -- Ensure :Rex is registered (also done from plugin/rex-nvim.lua).
   require("rex-nvim.commands").register()
   -- Default keymaps stay opt-out (keymaps = true) for backward compatibility.
@@ -128,17 +134,25 @@ end
 -- resolved -- paths are shortened against that agent's cwd. `on_sent(agent,
 -- payload)` runs only after a successful dispatch.
 local function deliver_to_agent(build_payload, opts, on_sent)
+  local dbg = require("rex-nvim.debug")
+  dbg.begin("deliver")
   local agent_list, err = agents.list()
+  dbg.log("initial agents.list: %d agent(s)", agent_list and #agent_list or 0)
   if not agent_list then
     vim.notify("rex-nvim: " .. err, vim.log.levels.ERROR)
     return
+  end
+  if M.config.agent_scope == "tab" then
+    agent_list = vim.tbl_filter(function(a) return a.same_window end, agent_list)
   end
   local function deliver(agent)
     if agent.status == "working" then
       vim.notify("rex-nvim: " .. agents.display(agent) .. " is working — sending anyway", vim.log.levels.WARN)
     end
     local payload = build_payload(agent)
+    dbg.log("dispatching %d bytes to %s", #payload, agent.block_id)
     local ok, derr = dispatch.send(agent.block_id, payload, opts)
+    dbg.log("dispatch done (ok=%s)", tostring(ok))
     if not ok then
       vim.notify("rex-nvim: " .. derr, vim.log.levels.ERROR)
       return

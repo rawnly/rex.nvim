@@ -106,6 +106,7 @@ function M.spawn(preferred, exec)
     "--focus=false", "--json", "--label", preferred.cmd, "-c", vim.fn.getcwd(), "--",
     unpack(vim.split(preferred.cmd, "%s+", { trimempty = true })),
   }
+  require("rex-nvim.debug").log("spawn: rex split %s", preferred.cmd)
   local r = exec(argv)
   if r.code ~= 0 then return nil, failure("rex split", r) end
   local ok, decoded = pcall(vim.json.decode, r.stdout)
@@ -117,26 +118,59 @@ function M.spawn(preferred, exec)
   return id
 end
 
--- Poll until `block_id` shows up as an agent, then call cb(agent); on timeout
--- call cb(nil, err). Non-blocking. A short settle delay after detection lets
--- the agent's input box come up before we paste into it.
+-- Poll until `block_id` shows up as an agent, then until its screen has been
+-- drawn and stopped changing (the TUI is up and its input box can take a
+-- paste), then call cb(agent). On timeout call cb(nil, err). Non-blocking.
+-- Detection alone isn't enough: the process is the foreground program well
+-- before it has rendered, and anything pasted that early is lost.
 function M.await(block_id, opts, cb, exec)
-  opts = vim.tbl_extend("force", { timeout_ms = 15000, interval_ms = 250, settle_ms = 500 }, opts or {})
-  local waited = 0
-  local function poll()
-    local list = M.list(exec)
-    for _, a in ipairs(list or {}) do
-      if a.block_id == block_id then
-        vim.defer_fn(function() cb(a) end, opts.settle_ms)
-        return
-      end
-    end
+  exec = exec or exec_mod.default_exec
+  opts = vim.tbl_extend("force", {
+    timeout_ms = 20000, interval_ms = 250, settle_ms = 500, stable_polls = 3,
+  }, opts or {})
+  local dbg = require("rex-nvim.debug")
+  local waited, polls = 0, 0
+  local found, last, stable = nil, nil, 0
+
+  local function tick(fn)
     if waited >= opts.timeout_ms then
-      cb(nil, "timed out waiting for the agent to start")
+      dbg.log("await: timed out after %d polls (%s)", polls, found and "screen never settled" or "agent never detected")
+      cb(nil, found and "timed out waiting for the agent to finish starting"
+        or "timed out waiting for the agent to start")
       return
     end
     waited = waited + opts.interval_ms
-    vim.defer_fn(poll, opts.interval_ms)
+    vim.defer_fn(fn, opts.interval_ms)
+  end
+
+  local function poll()
+    polls = polls + 1
+    if not found then
+      local list = M.list(exec)
+      dbg.log("await poll #%d: %d agent(s) listed, waiting for %s", polls, list and #list or 0, block_id)
+      for _, a in ipairs(list or {}) do
+        if a.block_id == block_id then
+          found = a
+          dbg.log("await: agent detected (kind=%s status=%s); waiting for screen to settle", a.kind, a.status)
+        end
+      end
+      if not found then return tick(poll) end
+    end
+    local r = exec({ "rex", "capture", "-b", block_id, "--trim" })
+    local screen = r.code == 0 and vim.trim(r.stdout) or ""
+    if screen ~= "" and screen == last then
+      stable = stable + 1
+    else
+      stable = 0
+    end
+    last = screen
+    dbg.log("await poll #%d: screen %d bytes, stable %d/%d", polls, #screen, stable, opts.stable_polls)
+    if stable >= opts.stable_polls then
+      dbg.log("await: screen settled, sending after %dms", opts.settle_ms)
+      vim.defer_fn(function() cb(found) end, opts.settle_ms)
+      return
+    end
+    tick(poll)
   end
   poll()
 end

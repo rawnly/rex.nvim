@@ -12,19 +12,19 @@ T.test("commands: register creates :Rex and is idempotent", function()
   commands.register() -- must not error
   T.eq(vim.fn.exists(":Rex"), 2)
   local info = vim.api.nvim_get_commands({}).Rex
-  T.eq(info.nargs, "?")
+  T.eq(info.nargs, "*")
   T.ok(info.range, "command accepts a range")
 end)
 
 T.test("commands: register replaces a pre-existing placeholder", function()
   clear_cmd()
-  vim.api.nvim_create_user_command("Rex", function() end, { nargs = "*" })
+  vim.api.nvim_create_user_command("Rex", function() end, { nargs = 0 })
   commands.register()
-  T.eq(vim.api.nvim_get_commands({}).Rex.nargs, "?")
+  T.eq(vim.api.nvim_get_commands({}).Rex.nargs, "*")
 end)
 
 T.test("commands: complete filters subcommands by lead", function()
-  T.eq(commands.complete("", "Rex "), { "comment", "list", "send", "submit", "ref" })
+  T.eq(commands.complete("", "Rex "), { "comment", "list", "send", "submit", "ref", "debug" })
   T.eq(commands.complete("s", "Rex s"), { "send", "submit" })
   T.eq(commands.complete("r", "Rex r"), { "ref" })
   T.eq(commands.complete("c", "Rex c"), { "comment" })

@@ -2,7 +2,8 @@
 -- and completions. Private module; the public API lives in rex-nvim.init.
 local M = {}
 
-local subcommands = { "comment", "list", "send", "submit", "ref" }
+local subcommands = { "comment", "list", "send", "submit", "ref", "debug" }
+local debug_actions = { "on", "off", "log", "clear" }
 
 -- Idempotent: delete-then-create also replaces lazy.nvim's `cmd` placeholder.
 function M.register()
@@ -10,7 +11,7 @@ function M.register()
   vim.api.nvim_create_user_command("Rex", function(opts)
     require("rex-nvim.commands").run(opts)
   end, {
-    nargs = "?",
+    nargs = "*",
     range = true,
     desc = "rex-nvim: comment, list, send, or submit code annotations; reference a line range",
     complete = function(arg_lead, cmdline)
@@ -27,6 +28,12 @@ function M.complete(arg_lead, cmdline)
     return {}
   end
   local lead = cmdline:sub(after + 1)
+  local dlead = lead:match("^debug%s+(%w*)$")
+  if dlead then
+    return vim.iter(debug_actions)
+      :filter(function(s) return vim.startswith(s, dlead) end)
+      :totable()
+  end
   if not lead:match("^%w*$") then
     return {}
   end
@@ -50,6 +57,19 @@ function M.run(opts)
     hn.send_all({ submit = false })
   elseif sub == "submit" then
     hn.send_all({ submit = true })
+  elseif sub == "debug" then
+    local dbg = require("rex-nvim.debug")
+    local action = opts.fargs[2] or (dbg.enabled and "log" or "on")
+    if action == "on" or action == "off" then
+      dbg.set(action == "on")
+      vim.notify("rex-nvim: debug " .. action, vim.log.levels.INFO)
+    elseif action == "log" then
+      dbg.show()
+    elseif action == "clear" then
+      dbg.clear()
+    else
+      vim.notify("Rex debug: expected on|off|log|clear", vim.log.levels.ERROR, { title = "rex-nvim" })
+    end
   else
     vim.notify(
       string.format("Rex: unknown subcommand %q (expected: %s)", sub or "", table.concat(subcommands, ", ")),

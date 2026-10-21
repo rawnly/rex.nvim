@@ -89,7 +89,10 @@ require("rex-nvim").setup({
   -- Opened in a new, unfocused 50% split beside nvim when no agent is running,
   -- then the prompt is sent to it. A command ("claude") or
   -- { cmd = "claude", split = "right", ratio = 50 }.
+  -- e.g. preferred_agent = "pi",
+  --  or  preferred_agent = { cmd = "pi", split = "right", ratio = 40 },
   preferred_agent = nil,
+  agent_scope = "session",  -- or "tab": only look for agents in nvim's own tab
 })
 ```
 

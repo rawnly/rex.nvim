@@ -119,6 +119,7 @@ rex-nvim.setup({opts}) ~
     preferred_agent = nil,    -- e.g. "claude": opened in a new unfocused
                               -- split when no agent is running, then sent to.
                               -- Or { cmd = "claude", split = "right", ratio = 50 }
+    agent_scope = "session",  -- or "tab": only agents in nvim's own tab
   })
 <
 
