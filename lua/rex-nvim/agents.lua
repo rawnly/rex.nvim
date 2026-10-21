@@ -85,6 +85,62 @@ function M.resolve(list)
   return nil
 end
 
+-- Normalize the `preferred_agent` option: a command string ("claude") or a
+-- table { cmd = "claude", split = "right", ratio = 50 }.
+function M.normalize_preferred(opt)
+  if type(opt) == "string" and opt ~= "" then opt = { cmd = opt } end
+  if type(opt) ~= "table" or type(opt.cmd) ~= "string" or opt.cmd == "" then return nil end
+  return { cmd = opt.cmd, split = opt.split or "right", ratio = opt.ratio or 50 }
+end
+
+-- Open `preferred.cmd` in a new, unfocused split beside this nvim's block (so
+-- it lands in the same tab). Returns the new block id.
+function M.spawn(preferred, exec)
+  exec = exec or exec_mod.default_exec
+  local here = vim.env.REX_BLOCK
+  if not here or here == "" then
+    return nil, "not running inside a Rex block (REX_BLOCK is unset)"
+  end
+  local argv = {
+    "rex", "split", "-b", here, "--split", preferred.split, "--ratio", tostring(preferred.ratio),
+    "--focus=false", "--json", "--label", preferred.cmd, "-c", vim.fn.getcwd(), "--",
+    unpack(vim.split(preferred.cmd, "%s+", { trimempty = true })),
+  }
+  local r = exec(argv)
+  if r.code ~= 0 then return nil, failure("rex split", r) end
+  local ok, decoded = pcall(vim.json.decode, r.stdout)
+  local id = ok and type(decoded) == "table" and decoded.block_ids and decoded.block_ids[1]
+  if not id then return nil, "rex split: unparseable JSON" end
+  -- A custom command isn't in `known`; make sure we can recognise it.
+  local name = vim.fs.basename(vim.split(preferred.cmd, "%s+", { trimempty = true })[1])
+  if not vim.list_contains(M.known, name) then table.insert(M.known, name) end
+  return id
+end
+
+-- Poll until `block_id` shows up as an agent, then call cb(agent); on timeout
+-- call cb(nil, err). Non-blocking. A short settle delay after detection lets
+-- the agent's input box come up before we paste into it.
+function M.await(block_id, opts, cb, exec)
+  opts = vim.tbl_extend("force", { timeout_ms = 15000, interval_ms = 250, settle_ms = 500 }, opts or {})
+  local waited = 0
+  local function poll()
+    local list = M.list(exec)
+    for _, a in ipairs(list or {}) do
+      if a.block_id == block_id then
+        vim.defer_fn(function() cb(a) end, opts.settle_ms)
+        return
+      end
+    end
+    if waited >= opts.timeout_ms then
+      cb(nil, "timed out waiting for the agent to start")
+      return
+    end
+    waited = waited + opts.interval_ms
+    vim.defer_fn(poll, opts.interval_ms)
+  end
+  poll()
+end
+
 function M.display(agent)
   local tail = vim.fn.fnamemodify(agent.cwd, ":t")
   return string.format("%s · %s · %s", agent.kind, agent.status, tail)

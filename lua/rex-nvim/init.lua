@@ -5,7 +5,11 @@ local agents = require("rex-nvim.agents")
 local dispatch = require("rex-nvim.dispatch")
 local ui = require("rex-nvim.ui")
 
-M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true }
+M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true,
+  -- Command (or { cmd, split, ratio }) to open in a new unfocused split when
+  -- there is no agent in the session to send to.
+  preferred_agent = nil,
+}
 
 -- Callback of each default keymap this plugin set, by mode and keys. setup()
 -- can run more than once (the sidebar daemon calls it again after the user's
@@ -140,6 +144,25 @@ local function deliver_to_agent(build_payload, opts, on_sent)
       return
     end
     on_sent(agent, payload)
+  end
+  if #agent_list == 0 then
+    local preferred = agents.normalize_preferred(M.config.preferred_agent)
+    if preferred then
+      local block_id, serr = agents.spawn(preferred)
+      if not block_id then
+        vim.notify("rex-nvim: " .. serr, vim.log.levels.ERROR)
+        return
+      end
+      vim.notify("rex-nvim: starting " .. preferred.cmd .. "…")
+      agents.await(block_id, nil, function(agent, aerr)
+        if not agent then
+          vim.notify("rex-nvim: " .. aerr, vim.log.levels.ERROR)
+          return
+        end
+        deliver(agent)
+      end)
+      return
+    end
   end
   -- Skip the picker when the target is unambiguous (the common one-agent case);
   -- fall back to the picker only when 2+ agents could plausibly be meant.

@@ -101,3 +101,38 @@ T.test("agents: display row leads with agent kind", function()
   local row = agents.display({ kind = "pi", title = "π - a", status = "idle", cwd = "/x/y/proj" })
   T.eq(row, "pi · idle · proj")
 end)
+
+T.test("agents: normalize_preferred accepts a string or table", function()
+  T.eq(agents.normalize_preferred("claude"), { cmd = "claude", split = "right", ratio = 50 })
+  T.eq(agents.normalize_preferred({ cmd = "pi", split = "below", ratio = 30 }),
+    { cmd = "pi", split = "below", ratio = 30 })
+  T.eq(agents.normalize_preferred(nil), nil)
+  T.eq(agents.normalize_preferred(""), nil)
+end)
+
+T.test("agents: spawn splits beside our block unfocused and returns the new id", function()
+  local saved = vim.env.REX_BLOCK
+  vim.env.REX_BLOCK = "block:me"
+  local seen
+  local id = agents.spawn({ cmd = "claude --foo", split = "right", ratio = 50 }, function(argv)
+    seen = argv
+    return { code = 0, stdout = vim.json.encode({ block_ids = { "block:new" } }), stderr = "" }
+  end)
+  vim.env.REX_BLOCK = saved
+  T.eq(id, "block:new")
+  T.eq(seen[2], "split")
+  T.ok(vim.list_contains(seen, "--focus=false"), "must not steal focus")
+  T.eq(seen[#seen - 1], "claude")
+  T.eq(seen[#seen], "--foo")
+  T.eq(seen[4], "block:me")
+end)
+
+T.test("agents: spawn reports a failing rex split", function()
+  local saved = vim.env.REX_BLOCK
+  vim.env.REX_BLOCK = "block:me"
+  local id, err = agents.spawn({ cmd = "claude", split = "right", ratio = 50 },
+    function() return { code = 1, stdout = "", stderr = "boom" } end)
+  vim.env.REX_BLOCK = saved
+  T.eq(id, nil)
+  T.ok(err:match("boom"), err)
+end)

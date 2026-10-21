@@ -86,6 +86,10 @@ require("rex-nvim").setup({
   prefix = "<leader>a",     -- keymap prefix
   keymaps = true,           -- set false to define your own
   clear_after_send = true,  -- comments are ephemeral by design
+  -- Opened in a new, unfocused 50% split beside nvim when no agent is running,
+  -- then the prompt is sent to it. A command ("claude") or
+  -- { cmd = "claude", split = "right", ratio = 50 }.
+  preferred_agent = nil,
 })
 ```
 
