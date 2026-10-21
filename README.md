@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/47bc945d-6377-4df5-80a6-93bd219fd1b6
+
 # rex-nvim
 
 Code-review comments in Neovim, sent to the coding agent running next to you
