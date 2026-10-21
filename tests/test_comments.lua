@@ -1,4 +1,4 @@
-local comments = require("herdr-nvim.comments")
+local comments = require("rex-nvim.comments")
 
 local function scratch(lines, name)
   local b = vim.api.nvim_create_buf(false, true)

@@ -1,4 +1,4 @@
-local prompt = require("herdr-nvim.prompt")
+local prompt = require("rex-nvim.prompt")
 
 T.test("prompt: single comment, no git context", function()
   local s = prompt.format({

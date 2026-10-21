@@ -1,4 +1,4 @@
-local dispatch = require("herdr-nvim.dispatch")
+local dispatch = require("rex-nvim.dispatch")
 
 local function recorder(fail_on)
   local calls = {}
@@ -9,34 +9,34 @@ local function recorder(fail_on)
   end
 end
 
-T.test("dispatch: paste mode sends text only, no Enter", function()
+T.test("dispatch: paste mode pastes text only, no Enter", function()
   local calls, exec = recorder()
-  local ok = dispatch.send("wA:p1", "line1\nline2", { submit = false }, exec)
+  local ok = dispatch.send("b:1", "line1\nline2", { submit = false }, exec)
   T.ok(ok)
-  T.eq(#calls, 1)
-  T.eq(calls[1], { "herdr", "pane", "send-text", "wA:p1", "line1\nline2" })
+  T.eq(calls, { { "rex", "send", "-b", "b:1", "\27[200~line1\nline2\27[201~" } })
 end)
 
-T.test("dispatch: send mode uses agent prompt (auto-submits)", function()
+T.test("dispatch: submit mode pastes then presses Enter", function()
   local calls, exec = recorder()
-  local ok = dispatch.send("wA:p1", "hi", { submit = true }, exec)
+  local ok = dispatch.send("b:1", "hi", { submit = true }, exec)
   T.ok(ok)
-  T.eq(#calls, 1)
-  T.eq(calls[1], { "herdr", "agent", "prompt", "wA:p1", "hi" })
+  T.eq(calls, {
+    { "rex", "send", "-b", "b:1", "\27[200~hi\27[201~" },
+    { "rex", "send-key", "-b", "b:1", "enter" },
+  })
 end)
 
-T.test("dispatch: failed agent prompt returns err", function()
+T.test("dispatch: failed send returns err and skips Enter", function()
   local calls, exec = recorder(1)
-  local ok, err = dispatch.send("wA:p1", "hi", { submit = true }, exec)
+  local ok, err = dispatch.send("b:1", "hi", { submit = true }, exec)
   T.eq(ok, false)
   T.ok(err:match("boom"))
   T.eq(#calls, 1)
 end)
 
-T.test("dispatch: failed pane send-text returns err", function()
-  local calls, exec = recorder(1)
-  local ok, err = dispatch.send("wA:p1", "hi", { submit = false }, exec)
+T.test("dispatch: failed send-key returns err", function()
+  local _, exec = recorder(2)
+  local ok, err = dispatch.send("b:1", "hi", { submit = true }, exec)
   T.eq(ok, false)
-  T.ok(err:match("boom"))
-  T.eq(#calls, 1)
+  T.ok(err:match("send%-key"))
 end)

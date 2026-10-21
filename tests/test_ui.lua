@@ -1,5 +1,5 @@
-local ui = require("herdr-nvim.ui")
-local comments = require("herdr-nvim.comments")
+local ui = require("rex-nvim.ui")
+local comments = require("rex-nvim.comments")
 
 local function scratch_named(lines, name)
   local b = vim.api.nvim_create_buf(false, true)

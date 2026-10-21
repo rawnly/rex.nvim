@@ -1,99 +1,100 @@
-local agents = require("herdr-nvim.agents")
+local agents = require("rex-nvim.agents")
 
-local fixture = vim.json.encode({
-  id = "cli:agent:list",
-  result = { agents = {
-    { pane_id = "wA:p1", workspace_id = "wA", agent = "pi",
-      agent_status = "idle", cwd = "/tmp/proj-a", terminal_title = "π - proj-a" },
-    { pane_id = "wB:p2", workspace_id = "wB", agent = "claude",
-      agent_status = "working", cwd = "/tmp/proj-b" },
+local blocks = vim.json.encode({ blocks = {
+  { block_id = "b:self", window_id = "w:1", label = "shell" },
+  { block_id = "b:pi", window_id = "w:1", label = "shell" },
+  { block_id = "b:claude", window_id = "w:2", label = "review" },
+  { block_id = "b:zsh", window_id = "w:2", label = "shell" },
+} })
+
+local responses = {
+  ["b:pi process"] = { foreground = { pid = 1, argv0 = "/usr/local/bin/pi", cwd = "/tmp/proj-a" } },
+  ["b:pi program_status"] = { records = {} },
+  ["b:claude process"] = { foreground = { pid = 2, argv0 = "claude", cwd = "/tmp/proj-b" } },
+  ["b:claude program_status"] = { records = {
+    { id = "sub", state = "idle" },
+    { state = "working", effective_app = "claude-code", owner = { pid = 2 } },
   } },
-})
+  ["b:zsh process"] = { foreground = { pid = 3, argv0 = "-zsh", cwd = "/tmp" } },
+  ["b:zsh program_status"] = { records = { { state = "working", app = "cargo", owner = { pid = 99 } } } },
+}
 
-local function fake_exec(out, code)
-  return function(_) return { code = code or 0, stdout = out, stderr = "" } end
+local function fake_exec(code)
+  return function(argv)
+    if code then return { code = code, stdout = "", stderr = "boom" } end
+    if argv[3] == "ls" then return { code = 0, stdout = blocks, stderr = "" } end
+    local resp = responses[argv[5] .. " " .. argv[6]]
+    return { code = resp and 0 or 1, stdout = resp and vim.json.encode(resp) or "", stderr = "" }
+  end
 end
 
-T.test("agents: parses list and normalizes fields", function()
-  local previous = vim.env.HERDR_WORKSPACE_ID
-  vim.env.HERDR_WORKSPACE_ID = nil
-  local list, err = agents.list(fake_exec(fixture))
-  vim.env.HERDR_WORKSPACE_ID = previous
-  T.eq(err, nil)
-  T.eq(#list, 2)
-  local by_pane = {}
-  for _, agent in ipairs(list) do by_pane[agent.pane_id] = agent end
-  T.eq(by_pane["wA:p1"].kind, "pi")
-  T.eq(by_pane["wA:p1"].status, "idle")
-  T.eq(by_pane["wA:p1"].title, "π - proj-a")
-  T.eq(by_pane["wB:p2"].title, "claude") -- falls back to kind
+local function with_env(env, fn)
+  local saved = {}
+  for k, v in pairs(env) do saved[k] = vim.env[k]; vim.env[k] = v end
+  local ok, err = pcall(fn)
+  for k in pairs(env) do vim.env[k] = saved[k] end
+  if not ok then error(err, 0) end
+end
+
+T.test("agents: lists agent blocks in the session, skipping our own", function()
+  with_env({ REX_SESSION = "s:1", REX_BLOCK = "b:self" }, function()
+    local list, err = agents.list(fake_exec())
+    T.eq(err, nil)
+    T.eq(#list, 2)
+    -- sorted by title: "pi" < "review"
+    T.eq(list[1], { block_id = "b:pi", window_id = "w:1", same_window = true,
+      kind = "pi", status = "unknown", cwd = "/tmp/proj-a", title = "pi" })
+    T.eq(list[2], { block_id = "b:claude", window_id = "w:2", same_window = false,
+      kind = "claude-code", status = "working", cwd = "/tmp/proj-b", title = "review" })
+  end)
 end)
 
-T.test("agents: no current workspace sorts by title", function()
-  vim.env.HERDR_WORKSPACE_ID = nil
-  local list = agents.list(fake_exec(fixture))
-  T.eq(list[1].pane_id, "wB:p2")
-  T.eq(list[1].title, "claude")
-  T.eq(list[2].pane_id, "wA:p1")
-  T.eq(list[2].title, "π - proj-a")
+T.test("agents: ignores a status left behind by an earlier program", function()
+  with_env({ REX_SESSION = "s:1", REX_BLOCK = "b:self" }, function()
+    for _, a in ipairs(agents.list(fake_exec())) do
+      T.ok(a.block_id ~= "b:zsh")
+    end
+  end)
 end)
 
-T.test("agents: current workspace excludes other workspaces", function()
-  vim.env.HERDR_WORKSPACE_ID = "wB"
-  local list = agents.list(fake_exec(fixture))
-  vim.env.HERDR_WORKSPACE_ID = nil
-  T.eq(#list, 1)
-  T.eq(list[1].pane_id, "wB:p2")
+T.test("agents: outside a Rex session returns err", function()
+  with_env({ REX_SESSION = "" }, function()
+    local list, err = agents.list(fake_exec())
+    T.eq(list, nil)
+    T.ok(err and err:match("REX_SESSION"))
+  end)
 end)
 
 T.test("agents: CLI failure returns err", function()
-  local list, err = agents.list(fake_exec("", 1))
-  T.eq(list, nil)
-  T.ok(err and err:match("herdr"))
+  with_env({ REX_SESSION = "s:1" }, function()
+    local list, err = agents.list(fake_exec(1))
+    T.eq(list, nil)
+    T.ok(err and err:match("boom"))
+  end)
 end)
 
-T.test("agents: unparseable JSON returns err", function()
-  local list, err = agents.list(fake_exec("not json"))
-  T.eq(list, nil)
-  T.ok(err and err:match("unparseable"))
+T.test("agents: resolve returns the lone session agent", function()
+  local a = agents.resolve({ { block_id = "b:1" } })
+  T.eq(a.block_id, "b:1")
 end)
 
-T.test("agents: resolve returns the lone workspace agent", function()
-  local a = agents.resolve({ { pane_id = "wA:p1", tab_id = "wA:t1" } })
-  T.eq(a.pane_id, "wA:p1")
-end)
-
-T.test("agents: resolve picks the single agent in the current tab", function()
-  local previous = vim.env.HERDR_TAB_ID
-  vim.env.HERDR_TAB_ID = "wA:t2"
+T.test("agents: resolve picks the single agent in our window", function()
   local a = agents.resolve({
-    { pane_id = "wA:p1", tab_id = "wA:t1" },
-    { pane_id = "wA:p2", tab_id = "wA:t2" },
+    { block_id = "b:1", same_window = false },
+    { block_id = "b:2", same_window = true },
   })
-  vim.env.HERDR_TAB_ID = previous
-  T.eq(a.pane_id, "wA:p2")
+  T.eq(a.block_id, "b:2")
 end)
 
-T.test("agents: resolve returns nil when the tab is ambiguous", function()
-  local previous = vim.env.HERDR_TAB_ID
-  vim.env.HERDR_TAB_ID = "wA:t1"
-  local a = agents.resolve({
-    { pane_id = "wA:p1", tab_id = "wA:t1" },
-    { pane_id = "wA:p2", tab_id = "wA:t1" },
-  })
-  vim.env.HERDR_TAB_ID = previous
-  T.eq(a, nil)
+T.test("agents: resolve returns nil when our window is ambiguous", function()
+  T.eq(agents.resolve({
+    { block_id = "b:1", same_window = true },
+    { block_id = "b:2", same_window = true },
+  }), nil)
 end)
 
-T.test("agents: resolve returns nil when no tab context disambiguates", function()
-  local previous = vim.env.HERDR_TAB_ID
-  vim.env.HERDR_TAB_ID = nil
-  local a = agents.resolve({
-    { pane_id = "wA:p1", tab_id = "wA:t1" },
-    { pane_id = "wB:p2", tab_id = "wB:t1" },
-  })
-  vim.env.HERDR_TAB_ID = previous
-  T.eq(a, nil)
+T.test("agents: resolve returns nil when no window disambiguates", function()
+  T.eq(agents.resolve({ { block_id = "b:1" }, { block_id = "b:2" } }), nil)
 end)
 
 T.test("agents: display row leads with agent kind", function()

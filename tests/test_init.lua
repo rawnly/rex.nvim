@@ -1,5 +1,5 @@
-local hn = require("herdr-nvim")
-local comments = require("herdr-nvim.comments")
+local hn = require("rex-nvim")
+local comments = require("rex-nvim.comments")
 
 T.test("init: setup creates guarded keymaps", function()
   vim.g.mapleader = " "
@@ -22,8 +22,8 @@ T.test("init: calling setup() again does not warn about its own keymaps", functi
   vim.notify = orig_notify
   hn.config = saved_config
   T.eq(warns, {})
-  T.eq(vim.fn.maparg(" hl", "n", false, true).desc, "herdr-nvim: list comments")
-  T.eq(vim.fn.maparg(" hc", "x", false, true).desc, "herdr-nvim: comment selection")
+  T.eq(vim.fn.maparg(" hl", "n", false, true).desc, "rex-nvim: list comments")
+  T.eq(vim.fn.maparg(" hc", "x", false, true).desc, "rex-nvim: comment selection")
 end)
 
 T.test("init: calling setup() again keeps a map the user set after the first call", function()
@@ -37,13 +37,13 @@ T.test("init: calling setup() again keeps a map the user set after the first cal
   vim.notify = orig_notify
   hn.config = saved_config
   T.ok(vim.fn.maparg(" ul", "n"):match("user owns this"), "must not clobber user map")
-  T.eq(warns, { "herdr-nvim: not overriding existing map <leader>ul" })
+  T.eq(warns, { "rex-nvim: not overriding existing map <leader>ul" })
   vim.keymap.del("n", " ul")
 end)
 
 T.test("init: comment_line adds a decorated comment via stubbed input", function()
   comments.clear()
-  local ui = require("herdr-nvim.ui")
+  local ui = require("rex-nvim.ui")
   local orig = ui.input_comment
   ui.input_comment = function(cb) cb("stub comment") end
   local b = vim.api.nvim_create_buf(false, true)
@@ -59,7 +59,7 @@ end)
 
 T.test("init: comment_range keeps the public line-range API", function()
   comments.clear()
-  local ui = require("herdr-nvim.ui")
+  local ui = require("rex-nvim.ui")
   local orig = ui.input_comment
   ui.input_comment = function(cb) cb("stub range") end
   local b = vim.api.nvim_create_buf(false, true)
@@ -76,7 +76,7 @@ end)
 
 T.test("init: comment_selection uses the visual marks", function()
   comments.clear()
-  local ui = require("herdr-nvim.ui")
+  local ui = require("rex-nvim.ui")
   local orig = ui.input_comment
   ui.input_comment = function(cb) cb("stub sel") end
   local b = vim.api.nvim_create_buf(false, true)
@@ -92,7 +92,7 @@ end)
 
 T.test("init: comment_selection normalizes reversed marks", function()
   comments.clear()
-  local ui = require("herdr-nvim.ui")
+  local ui = require("rex-nvim.ui")
   local orig = ui.input_comment
   ui.input_comment = function(cb) cb("stub sel") end
   local b = vim.api.nvim_create_buf(false, true)
@@ -108,7 +108,7 @@ end)
 
 T.test("init: edit_comment updates text and refreshes its callout", function()
   comments.clear()
-  local ui = require("herdr-nvim.ui")
+  local ui = require("rex-nvim.ui")
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, { "alpha" })
   local id = comments.add(b, { start_line = 1, end_line = 1 }, "old text")
@@ -145,15 +145,15 @@ T.test("init: send_all formats, dispatches, clears", function()
   vim.api.nvim_buf_set_name(b, "/tmp/hn-send.lua")
   comments.add(b, { start_line = 1, end_line = 1 }, "check this")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local sent = {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
-  ui.pick_agent = function(_, cb) cb({ pane_id = "wZ:p9", title = "π", status = "idle" }) end
-  dispatch.send = function(pane, text, opts) sent = { pane, text, opts }; return true end
+  ui.pick_agent = function(_, cb) cb({ block_id = "wZ:p9", title = "π", status = "idle" }) end
+  dispatch.send = function(block, text, opts) sent = { block, text, opts }; return true end
   local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":h")
-  agents.list = function() return { { pane_id = "wZ:p9", title = "π", status = "idle", cwd = dir } } end
+  agents.list = function() return { { block_id = "wZ:p9", title = "π", status = "idle", cwd = dir } } end
 
   hn.send_all({ submit = false })
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
@@ -172,14 +172,14 @@ T.test("init: send_all warns once when the resolved agent is working", function(
   vim.api.nvim_buf_set_name(b, "/tmp/hn-send-working.lua")
   comments.add(b, { start_line = 1, end_line = 1 }, "check this")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local warns = {}
   local o1, o2, o3, on = ui.pick_agent, dispatch.send, agents.list, vim.notify
   ui.pick_agent = function() error("picker must not open for a lone agent") end
   dispatch.send = function() return true end
-  agents.list = function() return { { pane_id = "wZ:p9", tab_id = "wZ:t1", kind = "pi", title = "pi", status = "working", cwd = "/x/y/z" } } end
+  agents.list = function() return { { block_id = "wZ:p9", window_id = "wZ:t1", kind = "pi", title = "pi", status = "working", cwd = "/x/y/z" } } end
   vim.notify = function(msg, level) if level == vim.log.levels.WARN then table.insert(warns, msg) end end
 
   hn.send_all({ submit = true })
@@ -196,25 +196,22 @@ T.test("init: send_all shows the picker when agents are ambiguous", function()
   vim.api.nvim_buf_set_name(b, "/tmp/hn-send-multi.lua")
   comments.add(b, { start_line = 1, end_line = 1 }, "check this")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
-  local previous = vim.env.HERDR_TAB_ID
-  vim.env.HERDR_TAB_ID = nil
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local picked, sent = false, {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   ui.pick_agent = function(l, cb) picked = true; cb(l[1]) end
-  dispatch.send = function(pane) sent = { pane }; return true end
+  dispatch.send = function(block) sent = { block }; return true end
   agents.list = function()
     return {
-      { pane_id = "wA:p1", tab_id = "wA:t1", title = "pi", status = "idle" },
-      { pane_id = "wB:p2", tab_id = "wB:t1", title = "claude", status = "idle" },
+      { block_id = "wA:p1", window_id = "wA:t1", title = "pi", status = "idle" },
+      { block_id = "wB:p2", window_id = "wB:t1", title = "claude", status = "idle" },
     }
   end
 
   hn.send_all({ submit = false })
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
-  vim.env.HERDR_TAB_ID = previous
 
   T.ok(picked, "picker must open when the target is ambiguous")
   T.eq(sent[1], "wA:p1")
@@ -227,14 +224,14 @@ T.test("init: send_all skips the picker for a lone agent", function()
   vim.api.nvim_buf_set_name(b, "/tmp/hn-send-solo.lua")
   comments.add(b, { start_line = 1, end_line = 1 }, "check this")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local picked, sent = false, {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   ui.pick_agent = function() picked = true end
-  dispatch.send = function(pane) sent = { pane }; return true end
-  agents.list = function() return { { pane_id = "wZ:p9", tab_id = "wZ:t1", title = "pi", status = "idle" } } end
+  dispatch.send = function(block) sent = { block }; return true end
+  agents.list = function() return { { block_id = "wZ:p9", window_id = "wZ:t1", title = "pi", status = "idle" } } end
 
   hn.send_all({ submit = false })
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
@@ -250,13 +247,13 @@ T.test("init: send_all retains comments when dispatch.send fails", function()
   vim.api.nvim_buf_set_name(b, "/tmp/hn-send-fail.lua")
   comments.add(b, { start_line = 1, end_line = 1 }, "check this")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
-  ui.pick_agent = function(_, cb) cb({ pane_id = "wZ:p9", title = "π", status = "idle" }) end
+  ui.pick_agent = function(_, cb) cb({ block_id = "wZ:p9", title = "π", status = "idle" }) end
   dispatch.send = function() return false, "boom" end
-  agents.list = function() return { { pane_id = "wZ:p9", title = "π", status = "idle" } } end
+  agents.list = function() return { { block_id = "wZ:p9", title = "π", status = "idle" } } end
 
   hn.send_all({ submit = false })
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
@@ -282,14 +279,14 @@ T.test("init: ref_range sends a bare citation, never submits, keeps comments", f
   vim.api.nvim_set_current_buf(b)
   comments.add(b, { start_line = 1, end_line = 1 }, "keep me")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local sent = {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   ui.pick_agent = function() error("picker must not open for a lone agent") end
-  dispatch.send = function(pane, text, opts) sent = { pane, text, opts }; return true end
-  agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
+  dispatch.send = function(block, text, opts) sent = { block, text, opts }; return true end
+  agents.list = function() return { { block_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
 
   hn.ref_range(2, 3)
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
@@ -306,11 +303,9 @@ T.test("init: ref_range shortens against the picked agent's cwd, not the buffer'
   vim.api.nvim_buf_set_name(b, "/repo/deep/x.lua")
   vim.api.nvim_set_current_buf(b)
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
-  local previous = vim.env.HERDR_TAB_ID
-  vim.env.HERDR_TAB_ID = nil
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local sent = {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   -- Two agents → the picker runs, so the cwd is only known after resolution.
@@ -318,14 +313,13 @@ T.test("init: ref_range shortens against the picked agent's cwd, not the buffer'
   dispatch.send = function(_, text) sent = { text }; return true end
   agents.list = function()
     return {
-      { pane_id = "wA:p1", tab_id = "wA:t1", title = "pi", status = "idle", cwd = "/repo" },
-      { pane_id = "wB:p2", tab_id = "wB:t1", title = "claude", status = "idle", cwd = "/repo/deep" },
+      { block_id = "wA:p1", window_id = "wA:t1", title = "pi", status = "idle", cwd = "/repo" },
+      { block_id = "wB:p2", window_id = "wB:t1", title = "claude", status = "idle", cwd = "/repo/deep" },
     }
   end
 
   hn.ref_range(1, 1)
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
-  vim.env.HERDR_TAB_ID = previous
 
   T.eq(sent[1], "x.lua:1 ", "path is relative to the agent that was picked")
 end)
@@ -339,14 +333,14 @@ T.test("init: ref_range warns on an unsaved buffer but still sends", function()
   vim.api.nvim_buf_set_lines(b, 0, -1, false, { "edited" })
   T.ok(vim.bo[b].modified, "precondition: the buffer is dirty")
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local warns, sent = {}, {}
   local o1, o2, o3, on = ui.pick_agent, dispatch.send, agents.list, vim.notify
   ui.pick_agent = function() end
   dispatch.send = function(_, text) sent = { text }; return true end
-  agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
+  agents.list = function() return { { block_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
   vim.notify = function(msg, level) if level == vim.log.levels.WARN then table.insert(warns, msg) end end
 
   hn.ref_range(1, 1)
@@ -362,7 +356,7 @@ T.test("init: ref_range refuses a buffer with no file", function()
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, { "a" })
   vim.api.nvim_set_current_buf(b)
-  local dispatch = require("herdr-nvim.dispatch")
+  local dispatch = require("rex-nvim.dispatch")
   local warns = {}
   local o1, on = dispatch.send, vim.notify
   dispatch.send = function() error("must not dispatch a nameless buffer") end
@@ -382,14 +376,14 @@ T.test("init: ref_line and ref_selection resolve their own span", function()
   vim.api.nvim_set_current_buf(b)
   vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-  local ui = require("herdr-nvim.ui")
-  local dispatch = require("herdr-nvim.dispatch")
-  local agents = require("herdr-nvim.agents")
+  local ui = require("rex-nvim.ui")
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
   local sent = {}
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   ui.pick_agent = function() end
   dispatch.send = function(_, text) sent[#sent + 1] = text; return true end
-  agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
+  agents.list = function() return { { block_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
 
   hn.ref_line()
   vim.api.nvim_buf_set_mark(b, "<", 2, 0, {})

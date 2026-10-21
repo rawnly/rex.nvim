@@ -1,0 +1,316 @@
+INTRODUCTION                                                        *rex-nvim*
+
+rex-nvim adds code annotations that you send to coding agents (claude, codex,
+pi, ...) running in other panes of your Rex session. Comment a line or a
+selection like a code review, list pending comments, then send them all to an
+agent — with file:line and git context. Or send nothing but a file:line
+reference, dropped into a message you are still typing
+(|rex-nvim.ref_range()|).
+
+Agents are found with the `rex` CLI: every other pane (block) in the current
+session whose foreground program is a known agent, or that reports a status
+through Rex (OSC 7501), is a candidate. Text is pasted with `rex send`; a
+submit also presses Enter with `rex send-key`.
+
+Links:
+- Repository: https://github.com/rawnly/rex-nvim
+
+Table of contents:
+
+1. FEATURES: What this plugin provides.                    |rex-nvim-features|
+2. REQUIREMENTS: Plugin dependencies and setup.        |rex-nvim-requirements|
+3. INSTALLATION: How to install the plugin.            |rex-nvim-installation|
+4. CONFIGURATION: Options and suggested keymaps.             |rex-nvim-config|
+5. COMMANDS: The :Rex user command.                  |rex-nvim-commands|
+6. HIGHLIGHTS: Highlight groups.                         |rex-nvim-highlights|
+7. API: Public Lua functions.                                   |rex-nvim-api|
+8. EXAMPLES: Statusline and plugin-manager setup.          |rex-nvim-examples|
+9. DEVELOPMENT: Testing.                                |rex-nvim-development|
+10. TROUBLESHOOTING: Common issues and solutions.   |rex-nvim-troubleshooting|
+================================================================================
+FEATURES                                                   *rex-nvim-features*
+
+An annotated block is drawn as three layers:
+
+- a solid amber rail in the sign column, one cell per line of the block
+- a subtle full-width background tint over those same lines
+- a callout above the first line naming the comment
+
+Comments are tracked with extmarks, so they follow your edits. They are
+ephemeral by design: in-memory only, cleared after a successful send.
+
+A characterwise (|v|) selection inside a line comments just that span: the
+agent receives only the selected text, located as `path:12:5-9` (1-indexed
+byte columns, inclusive, as in |col()|). A span over several lines sends the
+selected text under `path:12-14`. Linewise (|V|) and blockwise selections,
+and a |v| selection of one whole line, comment whole lines. The decoration
+still marks whole lines.
+
+A pending-comment indicator for your statusline is provided by
+|rex-nvim.statusline()|.
+
+A reference is the lighter half: just `path:12-20` and a trailing space, with
+no comment, no code and no decoration, for naming a location in the middle of
+a message you are already typing. The path is shortened against the cwd of the
+agent that receives it; a file outside that cwd keeps its absolute path. A
+single line collapses to `path:12`. A reference never submits, and never
+touches the pending comments.
+================================================================================
+REQUIREMENTS                                           *rex-nvim-requirements*
+
+- Neovim >= 0.10
+- nvim running inside a Rex session (`REX_SESSION` set)
+- The `rex` CLI available on PATH (lists agents, sends comments)
+================================================================================
+INSTALLATION                                           *rex-nvim-installation*
+
+Install with your plugin manager. With lazy.nvim:
+
+>lua
+  { "rawnly/rex-nvim", opts = {} }
+<
+
+The plugin registers the |rex-nvim-commands| command when it loads, so
+lazy.nvim can lazy-load it and declare the keymaps in the spec:
+
+>lua
+  {
+    "rawnly/rex-nvim",
+    cmd = { "Rex" },
+    keys = {
+      { "<leader>a", "", desc = "+AI", mode = { "n", "x" } },
+      { "<leader>ac", "<CMD>Rex comment<CR>", desc = "Comment" },
+      { "<leader>ac", function() require("rex-nvim").comment_selection() end, mode = "x" },
+      { "<leader>al", "<CMD>Rex list<CR>", desc = "List comments" },
+      { "<leader>as", "<CMD>Rex send<CR>", desc = "Send to agent" },
+      { "<leader>aS", "<CMD>Rex submit<CR>", desc = "Submit to agent" },
+      { "<leader>ai", "<CMD>Rex ref<CR>", desc = "Reference lines" },
+      { "<leader>ai", ":Rex ref<CR>", mode = "x" },
+    },
+    opts = {},
+  }
+<
+
+The leader-only `+AI` entry creates a which-key group; the `mode = "x"`
+entries share one key across normal and visual mode. The comment mapping calls
+|rex-nvim.comment_selection()| so a characterwise selection keeps its exact
+span. The visual reference mapping uses `:` rather than `<CMD>`: the `:` passes
+the selection as the `'<,'>` line range, while `<CMD>` would only see the cursor
+line.
+
+No plugin manager? Add the plugin to 'runtimepath': registration happens both
+from the runtimepath plugin script and from |rex-nvim.setup()|.
+================================================================================
+CONFIGURATION                                                *rex-nvim-config*
+
+Default keymaps are on. They use the `prefix` option (default `<leader>a`)
+and never override a map you already set. To bind your own instead, set
+`keymaps = false` and use the Lua API (|rex-nvim-api|) or the user command
+(|rex-nvim-commands|).
+
+rex-nvim.setup({opts}) ~
+  Configure the plugin. Optional — the defaults apply without calling it.
+
+>lua
+  require("rex-nvim").setup({
+    prefix = "<leader>a",     -- prefix for the default keymaps
+    keymaps = true,           -- set false to bind your own
+    clear_after_send = true,  -- clear comments after a successful send
+  })
+<
+
+Suggested keymaps: ~
+
+Copy-paste these into your config and adjust to taste — either bind the API
+functions directly, or bind through the command:
+
+>lua
+  local hn = require("rex-nvim")
+  vim.keymap.set("n", "<leader>ac", function() hn.comment_line() end)
+  vim.keymap.set("x", "<leader>ac", function() hn.comment_selection() end)
+  vim.keymap.set("n", "<leader>al", function() hn.list_comments() end)
+  vim.keymap.set("n", "<leader>as", "<Cmd>Rex send<CR>")
+  vim.keymap.set("n", "<leader>aS", "<Cmd>Rex submit<CR>")
+  vim.keymap.set("n", "<leader>ai", function() hn.ref_line() end)
+  vim.keymap.set("x", "<leader>ai", function() hn.ref_selection() end)
+<
+
+Prefer declaring keymaps in your plugin-manager spec? A lazy.nvim example
+with a which-key group lives in |rex-nvim-installation|.
+================================================================================
+COMMANDS                                                   *rex-nvim-commands*
+
+:Rex {comment, list, send, submit, ref} ~
+  Scoped command for the annotation actions, with subcommand completion.
+  The command is registered when the plugin loads; registration is
+  idempotent and happens both from the runtimepath plugin script and from
+  |rex-nvim.setup()|, so it works under lazy.nvim and vanilla nvim alike.
+
+  - `comment`: Add a whole-line comment over the command range. :Rex
+    comment targets the cursor line; :'<,'>Rex comment targets the visual
+    selection's line range; an explicit range like :5,10Rex comment is
+    honored. Use |rex-nvim.comment_selection()| for an exact characterwise
+    visual span.
+  - `list`: Open the comment list (a float). Hover jumps to the comment,
+    `⏎` edits, `d` deletes, `q`/<Esc> closes.
+  - `send`: Paste all comments into a chosen agent's input (no submit).
+  - `submit`: Paste all comments into a chosen agent's input and submit.
+  - `ref`: Send a bare `path:line` reference for the command range to a
+    chosen agent — no comment, no code, never a submit. :Rex ref targets
+    the cursor line; :'<,'>Rex ref the visual selection; an explicit
+    range like :5,10Rex ref is honored.
+
+Run :Rex with no subcommand (or an unknown one) for an error listing
+the valid subcommands.
+================================================================================
+HIGHLIGHTS                                               *rex-nvim-highlights*
+
+Set with `default = true`, so colourschemes may override them.
+
+                                               *rex-nvim-RexNvimCommentSign*
+RexNvimCommentSign ~
+  The amber rail in the sign column and the callout corner. Default: bold
+  amber. Override to retheme.
+
+                                               *rex-nvim-RexNvimCommentText*
+RexNvimCommentText ~
+  The callout text. Default: amber. Override to retheme.
+
+                                               *rex-nvim-RexNvimCommentLine*
+RexNvimCommentLine ~
+  The background tint under an annotated block. Linked to CursorLine so it
+  tracks the active colourscheme; do not override with a fixed color.
+================================================================================
+API                                                             *rex-nvim-api*
+
+The public API is the module returned by `require("rex-nvim")`. All
+other modules in the plugin are private and may change.
+
+                                                            *rex-nvim.setup()*
+rex-nvim.setup({opts}) ~
+  Set plugin options. Optional; the defaults apply without it. Options are
+  documented in |rex-nvim-config|. Ensures the |rex-nvim-commands|
+  command is registered.
+  Parameters: ~
+    {opts} (`table`) Options. See |rex-nvim-config|.
+
+                                                    *rex-nvim.comment_range()*
+rex-nvim.comment_range({start_line}, {end_line}) ~
+  Add a comment over a 1-indexed, inclusive line range in the current
+  buffer. Prompts for the comment text via vim.ui.input.
+  Parameters: ~
+    {start_line} (`integer`) First line of the range.
+    {end_line} (`integer`) Last line of the range (inclusive).
+
+                                                     *rex-nvim.comment_line()*
+rex-nvim.comment_line() ~
+  Add a comment on the current line. Equivalent to
+  |rex-nvim.comment_range()| with the cursor line.
+
+                                                *rex-nvim.comment_selection()*
+rex-nvim.comment_selection() ~
+  Add a comment over the current visual selection. A characterwise (|v|)
+  selection comments the exact span (multibyte characters and
+  'selection' are honored); linewise and blockwise selections comment
+  whole lines.
+
+                                                    *rex-nvim.list_comments()*
+rex-nvim.list_comments() ~
+  Open the interactive comment list as a floating window. Cursor movement
+  previews (jumps the code window to) each comment; `⏎` edits, `d` deletes,
+  `q`/<Esc> closes.
+
+                                                     *rex-nvim.edit_comment()*
+rex-nvim.edit_comment({comment}, {on_done}) ~
+  Edit a comment's text in place and refresh its decoration. The comment
+  is briefly undecorated while editing, then re-decorated with the new text.
+  Parameters: ~
+    {comment} (`rex.Comment`) The comment to edit.
+    {on_done} (`function|nil`) Optional callback fired when the input closes.
+
+                                                   *rex-nvim.delete_comment()*
+rex-nvim.delete_comment({comment}) ~
+  Remove a comment and its decoration.
+  Parameters: ~
+    {comment} (`rex.Comment`) The comment to remove.
+
+                                                         *rex-nvim.send_all()*
+rex-nvim.send_all({opts}) ~
+  Send all pending comments to an agent: the lone agent in the session, or
+  the single agent in this nvim's window (tab); otherwise one picked via
+  vim.ui.select. The comments go out as a formatted prompt with file:line
+  and git context. Each path
+  is shortened against the receiving agent's cwd (a file outside it stays
+  absolute), and a single line collapses to `path:12`, the same spelling as
+  |rex-nvim.ref_range()|. A span inside one line is `path:12:5-9`
+  (1-indexed byte columns, inclusive) and sends only the selected text.
+  Parameters: ~
+    {opts} (`table`) Options:
+    - `submit` (`boolean`, default false): when true, auto-submits the text
+      into the agent's input instead of just pasting it.
+
+  When |rex-nvim.setup()| opts `clear_after_send` is true (the default),
+  comments are cleared after a successful send.
+
+                                                        *rex-nvim.ref_range()*
+rex-nvim.ref_range({start_line}, {end_line}) ~
+  Send a bare `path:line` reference for a 1-indexed, inclusive line range to
+  an agent, with a trailing space and nothing else: no comment, no code, no
+  git context. A single-line range collapses to `path:12`. The path is
+  shortened against the cwd of the agent that receives it; a file outside
+  that cwd keeps its absolute path. Never submits, and never touches pending
+  comments. A buffer with no file name is refused with a warning; a buffer
+  with unsaved changes warns (the agent reads the file on disk) but still
+  sends.
+  Parameters: ~
+    {start_line} (`integer`) First line of the range.
+    {end_line} (`integer`) Last line of the range (inclusive).
+
+                                                         *rex-nvim.ref_line()*
+rex-nvim.ref_line() ~
+  Reference the current line. Equivalent to |rex-nvim.ref_range()| with the
+  cursor line.
+
+                                                    *rex-nvim.ref_selection()*
+rex-nvim.ref_selection() ~
+  Reference the current visual selection. Equivalent to
+  |rex-nvim.ref_range()| over the visual marks.
+
+                                                       *rex-nvim.statusline()*
+rex-nvim.statusline() ~
+  Statusline indicator for pending comments.
+  Return: ~
+    `string` `"● N"` when N comments are pending, or `""` when none.
+================================================================================
+EXAMPLES                                                   *rex-nvim-examples*
+
+A pending-comment indicator in your statusline: ~
+
+>lua
+  -- inside your statusline component
+  { function() return require("rex-nvim").statusline() end },
+<
+================================================================================
+DEVELOPMENT                                               *rex-nvim-development*
+
+Run the headless Lua suite:
+
+>bash
+  nvim --headless --noplugin -u NONE -l tests/run.lua
+<
+================================================================================
+TROUBLESHOOTING                                       *rex-nvim-troubleshooting*
+
+Issue: "not running inside a Rex session" ~
+- Start nvim from a Rex pane so it inherits `REX_SESSION` and `REX_BLOCK`.
+
+Issue: "no agents found in this Rex session" ~
+- The agent must run in another pane of the same session. Agents that do not
+  report a status through Rex are recognized by program name; see
+  `require("rex-nvim.agents").known` and add yours to that list.
+
+Issue: :Rex is not recognized ~
+- For lazy-loaded installs, the command is registered when the plugin loads
+  (first keypress, or the first :Rex with `cmd = { "Rex" }`).
+
+vim:tw=78:ts=8:et:ft=help:norl:
