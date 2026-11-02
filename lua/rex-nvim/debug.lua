@@ -39,7 +39,12 @@ function M.wrap_exec(exec)
     if not M.enabled then return exec(argv) end
     local s = hrtime()
     local r = exec(argv)
-    M.log("exec %s → code %s in %.1fms", table.concat(argv, " "), tostring(r.code), (hrtime() - s) / 1e6)
+    -- `rex send` carries the review payload (code + comments): never log it.
+    local shown = argv
+    if argv[1] == "rex" and argv[2] == "send" then
+      shown = { argv[1], argv[2], "<redacted>" }
+    end
+    M.log("exec %s → code %s in %.1fms", table.concat(shown, " "), tostring(r.code), (hrtime() - s) / 1e6)
     return r
   end
 end

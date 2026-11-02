@@ -225,7 +225,15 @@ function M.await(block_id, opts, cb, exec)
     last = screen
     dbg.log("await poll #%d: screen %d bytes, stable %d/%d", polls, #screen, stable, opts.stable_polls)
     if stable >= opts.stable_polls then
-      vim.defer_fn(function() cb(found) end, opts.settle_ms)
+      vim.defer_fn(function()
+        -- Revalidate: the agent may have exited (leaving a shell) while settling.
+        local still = describe(exec, { block_id = block_id }, nil, true)
+        if not still then
+          cb(nil, "the agent exited before it was ready")
+          return
+        end
+        cb(still)
+      end, opts.settle_ms)
       return
     end
     again(poll)

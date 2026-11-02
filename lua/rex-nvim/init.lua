@@ -249,7 +249,9 @@ function M.send_all(opts)
   end, opts, function(agent)
     if M.config.clear_after_send then
       for _, c in ipairs(sent) do
-        M.delete_comment(c)
+        -- Keep comments edited after the snapshot was sent.
+        local now = comments.get(c.id)
+        if not now or now.text == c.text then M.delete_comment(c) end
       end
     end
     vim.notify(string.format("rex-nvim: sent %d comment(s) to %s", #sent, agent.title))
