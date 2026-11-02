@@ -124,7 +124,12 @@ end
 
 -- Normalize the `preferred_agent` option: a command string ("claude"), an argv
 -- list, or a table { cmd = "claude" | {argv...}, name = "claude", split = "right",
--- ratio = 50 }. `name` is the process name used to recognise the agent later.
+-- ratio = 50, float = false, side = "right" }. `name` is the process name used
+-- to recognise the agent later. With `float = true` the agent opens in a
+-- floating pane docked to `side` ("left" | "right"; defaults to `split` when
+-- that is left/right, else "right") and taking `ratio` percent of the width.
+-- Unless `submit = false`, a submitting send (:Rex submit) presses Enter after
+-- the paste lands in a freshly started agent; a paste-only send never does.
 function M.normalize_preferred(opt)
   if type(opt) == "string" or (type(opt) == "table" and opt[1] ~= nil) then opt = { cmd = opt } end
   if type(opt) ~= "table" then return nil end
@@ -142,6 +147,9 @@ function M.normalize_preferred(opt)
     explicit_name = opt.name ~= nil,
     split = opt.split or "right",
     ratio = opt.ratio or 50,
+    float = opt.float == true,
+    submit = opt.submit ~= false,
+    side = opt.side or (opt.split == "left" and "left") or "right",
   }
 end
 
@@ -152,14 +160,50 @@ function M.register(preferred)
   if not vim.list_contains(M.known, preferred.name) then table.insert(M.known, preferred.name) end
 end
 
+-- Open the preferred agent in a floating pane docked to the left or right
+-- edge of this nvim's window, and focus it. Returns the new block id.
+local function spawn_float(preferred, here, exec)
+  local sid = vim.env.REX_SESSION
+  if not sid or sid == "" then return nil, "not running inside a Rex session (REX_SESSION is unset)" end
+  local width = math.min(math.max((tonumber(preferred.ratio) or 50) / 100, 0.1), 1)
+  local x = preferred.side == "left" and 0 or 1 - width
+  local window_id
+  -- Float on the window nvim is in, not whichever window is active.
+  local r = exec({ "rex", "api", "call", "-s", sid, "session.describe_block",
+    vim.json.encode({ block_id = here }) })
+  if r.code == 0 then
+    local ok, decoded = pcall(vim.json.decode, r.stdout)
+    window_id = ok and type(decoded) == "table" and decoded.block and decoded.block.window_id or nil
+  end
+  local args = {
+    bounds = { x, 0, width, 1 },
+    focus = true,
+    window_id = window_id,
+    layout = { block = {
+      flavor = "com.superlogical.terminal.shell",
+      label = preferred.cmd,
+      options = { cwd = vim.fn.getcwd(), command = preferred.argv },
+    } },
+  }
+  require("rex-nvim.debug").log("spawn: float %s (%s)", preferred.cmd, preferred.side)
+  r = exec({ "rex", "api", "call", "-s", sid, "session.new_layer", vim.json.encode(args) })
+  if r.code ~= 0 then return nil, failure("rex api session.new_layer", r) end
+  local ok, decoded = pcall(vim.json.decode, r.stdout)
+  local id = ok and type(decoded) == "table" and decoded.block_ids and decoded.block_ids[1]
+  if not id then return nil, "session.new_layer: unparseable JSON" end
+  return id
+end
+
 -- Open the preferred agent in a new, unfocused split beside this nvim's block
--- (so it lands in the same tab). Returns the new block id.
+-- (so it lands in the same tab), or in a floating pane when `float` is set.
+-- Returns the new block id.
 function M.spawn(preferred, exec)
   exec = exec or exec_mod.default_exec
   local here = vim.env.REX_BLOCK
   if not here or here == "" then
     return nil, "not running inside a Rex block (REX_BLOCK is unset)"
   end
+  if preferred.float then return spawn_float(preferred, here, exec) end
   local argv = {
     "rex", "split", "-b", here, "--split", preferred.split, "--ratio", tostring(preferred.ratio),
     "--focus=false", "--json", "--label", preferred.cmd, "-c", vim.fn.getcwd(), "--",

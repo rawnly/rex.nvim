@@ -6,7 +6,7 @@ local dispatch = require("rex-nvim.dispatch")
 local ui = require("rex-nvim.ui")
 
 M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true,
-  -- Command (or { cmd, split, ratio }) to open in a new unfocused split when
+  -- Command (or { cmd, split, ratio, float, side, submit }) to open in a new unfocused split when
   -- there is no agent in the session to send to.
   preferred_agent = nil,
   -- Log timings to an in-memory buffer; view with `:Rex debug log`.
@@ -158,8 +158,8 @@ local function deliver_to_agent(build_payload, opts, on_sent)
     agent_list = vim.tbl_filter(function(a) return a.same_window end, agent_list)
   end
   -- `fresh` = we just spawned it: its screen may still be a startup dialog
-  -- (trust prompt, login), so never auto-submit and verify the paste landed.
-  local function deliver(agent, fresh)
+  -- (trust prompt, login), so only submit after verifying the paste landed.
+  local function deliver(agent, fresh, auto_submit)
     if agent.status == "working" then
       vim.notify("rex-nvim: " .. agents.display(agent) .. " is working — sending anyway", vim.log.levels.WARN)
     end
@@ -168,26 +168,44 @@ local function deliver_to_agent(build_payload, opts, on_sent)
     local send_opts = opts
     if fresh then send_opts = vim.tbl_extend("force", opts or {}, { submit = false }) end
     local before = fresh and agents.capture(agent.block_id) or nil
-    dbg.log("dispatching %d bytes to %s", #payload, agent.block_id)
-    local ok, derr = dispatch.send(agent.block_id, payload, send_opts)
-    dbg.log("dispatch done (ok=%s)", tostring(ok))
-    if not ok then
-      vim.notify("rex-nvim: " .. derr, vim.log.levels.ERROR)
-      return
-    end
-    if not fresh then return on_sent(agent, payload) end
-    vim.defer_fn(function()
-      if agents.capture(agent.block_id) == before then
-        vim.notify("rex-nvim: " .. agent.title .. " did not take the paste (still on its startup screen?) — comments kept",
-          vim.log.levels.ERROR)
+    -- A freshly started agent can look settled (stable screen) before its input
+    -- box exists, and a paste sent then is dropped. Unchanged screen after the
+    -- paste means nothing landed, so resending is safe: retry a few times.
+    local attempts_left = fresh and 4 or 1
+    local function attempt()
+      attempts_left = attempts_left - 1
+      dbg.log("dispatching %d bytes to %s", #payload, agent.block_id)
+      local ok, derr = dispatch.send(agent.block_id, payload, send_opts)
+      dbg.log("dispatch done (ok=%s)", tostring(ok))
+      if not ok then
+        vim.notify("rex-nvim: " .. derr, vim.log.levels.ERROR)
         return
       end
-      on_sent(agent, payload)
-      if opts and opts.submit then
-        vim.notify("rex-nvim: agent was just started — pasted but not submitted; review and press Enter",
-          vim.log.levels.WARN)
-      end
-    end, 300)
+      if not fresh then return on_sent(agent, payload) end
+      vim.defer_fn(function()
+        if agents.capture(agent.block_id) == before then
+          if attempts_left > 0 then
+            dbg.log("paste not taken; retrying (%d left)", attempts_left)
+            return vim.defer_fn(attempt, 700)
+          end
+          vim.notify("rex-nvim: " .. agent.title .. " did not take the paste (still on its startup screen?) — comments kept",
+            vim.log.levels.ERROR)
+          return
+        end
+        if auto_submit and opts and opts.submit then
+          local sok, serr = dispatch.submit(agent.block_id)
+          dbg.log("auto-submit (ok=%s)", tostring(sok))
+          if not sok then vim.notify("rex-nvim: " .. serr, vim.log.levels.ERROR) end
+          return on_sent(agent, payload)
+        end
+        on_sent(agent, payload)
+        if opts and opts.submit then
+          vim.notify("rex-nvim: agent was just started — pasted but not submitted (submit = false); review and press Enter",
+            vim.log.levels.WARN)
+        end
+      end, 300)
+    end
+    attempt()
   end
   if #agent_list == 0 then
     local preferred = agents.normalize_preferred(M.config.preferred_agent)
@@ -209,7 +227,7 @@ local function deliver_to_agent(build_payload, opts, on_sent)
         vim.notify("rex-nvim: " .. aerr, vim.log.levels.ERROR)
         return
       end
-      deliver(agent, true)
+      deliver(agent, true, preferred.submit)
     end)
     return
   end

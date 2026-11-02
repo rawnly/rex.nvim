@@ -185,6 +185,52 @@ T.test("agents: spawn splits beside our block unfocused and returns the new id",
   T.eq(seen[4], "block:me")
 end)
 
+T.test("agents: normalize_preferred float and side", function()
+  local n = agents.normalize_preferred({ cmd = "pi", float = true })
+  T.eq({ n.float, n.side }, { true, "right" })
+  n = agents.normalize_preferred({ cmd = "pi", float = true, split = "left" })
+  T.eq(n.side, "left")
+  n = agents.normalize_preferred({ cmd = "pi", float = true, split = "left", side = "right" })
+  T.eq(n.side, "right")
+  T.eq(agents.normalize_preferred("pi").float, false)
+  T.eq(agents.normalize_preferred("pi").submit, true)
+  T.eq(agents.normalize_preferred({ cmd = "pi", submit = false }).submit, false)
+end)
+
+T.test("agents: spawn float opens a docked, focused layer in nvim's window", function()
+  local sb, ss = vim.env.REX_BLOCK, vim.env.REX_SESSION
+  vim.env.REX_BLOCK, vim.env.REX_SESSION = "block:me", "session:s"
+  local calls = {}
+  local id = agents.spawn(agents.normalize_preferred({ cmd = "claude --foo", float = true, side = "left", ratio = 40 }),
+    function(argv)
+      calls[#calls + 1] = argv
+      if argv[6] == "session.describe_block" then
+        return { code = 0, stdout = vim.json.encode({ block = { window_id = "window:w" } }), stderr = "" }
+      end
+      return { code = 0, stdout = vim.json.encode({ block_ids = { "block:new" } }), stderr = "" }
+    end)
+  vim.env.REX_BLOCK, vim.env.REX_SESSION = sb, ss
+  T.eq(id, "block:new")
+  T.eq(calls[2][6], "session.new_layer")
+  local args = vim.json.decode(calls[2][7])
+  T.eq(args.bounds, { 0, 0, 0.4, 1 })
+  T.eq(args.focus, true)
+  T.eq(args.window_id, "window:w")
+  T.eq(args.layout.block.options.command, { "claude", "--foo" })
+end)
+
+T.test("agents: spawn float docks right", function()
+  local sb, ss = vim.env.REX_BLOCK, vim.env.REX_SESSION
+  vim.env.REX_BLOCK, vim.env.REX_SESSION = "block:me", "session:s"
+  local bounds
+  agents.spawn(agents.normalize_preferred({ cmd = "claude", float = true, ratio = 25 }), function(argv)
+    if argv[6] == "session.new_layer" then bounds = vim.json.decode(argv[7]).bounds end
+    return { code = 0, stdout = vim.json.encode({ block_ids = { "block:new" } }), stderr = "" }
+  end)
+  vim.env.REX_BLOCK, vim.env.REX_SESSION = sb, ss
+  T.eq(bounds, { 0.75, 0, 0.25, 1 })
+end)
+
 T.test("agents: spawn reports a failing rex split", function()
   local saved = vim.env.REX_BLOCK
   vim.env.REX_BLOCK = "block:me"

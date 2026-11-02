@@ -170,9 +170,13 @@ COMMANDS                                                   *rex-nvim-commands*
     With no argument: show the log if enabled, else enable.
 
     `preferred_agent` may be a string, an argv list, or { cmd, name, split,
-    ratio }. `name` is the process name used to recognise the agent later
-    (needed for wrappers like `npx`). A freshly started agent is never
-    auto-submitted: the prompt is pasted and you press Enter yourself.
+    ratio, float, side }. `name` is the process name used to recognise the
+    agent later (needed for wrappers like `npx`). With `float = true` the
+    agent opens in a floating pane docked to `side` ("left" or "right";
+    defaults to `split` if that is left/right, else "right"), `ratio` percent
+    of the window wide. A submitting send (:Rex submit) presses Enter
+    once the paste has landed in a freshly started agent; set `submit = false`
+    to opt out and press Enter yourself. A paste-only send never submits.
 
 Run :Rex with no subcommand (or an unknown one) for an error listing
 the valid subcommands.
