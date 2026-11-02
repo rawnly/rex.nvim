@@ -23,4 +23,14 @@ function M.send(block_id, text, opts, exec)
   return true
 end
 
+-- Press Enter in the agent's input box.
+function M.submit(block_id, exec)
+  exec = exec or exec_mod.default_exec
+  local r = exec({ "rex", "send-key", "-b", block_id, "enter" })
+  if r.code ~= 0 then
+    return false, "rex send-key failed: " .. (r.stderr ~= "" and vim.trim(r.stderr) or ("exit " .. r.code))
+  end
+  return true
+end
+
 return M

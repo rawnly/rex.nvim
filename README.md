@@ -67,6 +67,33 @@ appears when two or more agents could plausibly be meant.
 Text is pasted with `rex send` (as a bracketed paste, so multi-line prompts
 stay in the input box); `submit` then presses Enter with `rex send-key`.
 
+## Starting an agent
+
+With `preferred_agent` set, sending when no agent is running starts one first,
+waits until it has drawn its input box, then delivers the prompt.
+
+| Key | Default | |
+| --- | --- | --- |
+| `cmd` | | command to run: a string, or an argv list |
+| `split` | `"right"` | where the new pane goes: `right`, `left`, `above`, `below` |
+| `ratio` | `50` | percent of the space the pane takes (width when floating) |
+| `float` | `false` | open a focused floating pane docked to one side instead of a split |
+| `side` | `split` if left/right, else `"right"` | which edge a floating pane docks to |
+| `submit` | `true` | `:Rex submit` presses Enter once the paste has landed; `false` leaves Enter to you |
+| `name` | basename of `cmd` | process name used to recognise the agent later (needed for wrappers like `npx`) |
+
+A plain split opens unfocused; a floating pane takes focus. `:Rex send` only
+pastes, whatever `submit` says. A pasted prompt that a still-starting agent
+drops is retried a few times before giving up.
+
+```lua
+preferred_agent = { cmd = "claude", float = true, side = "right", ratio = 30 }
+```
+
+Set `agent_scope = "tab"` to only consider agents in nvim's own tab.
+`:Rex debug on|off|log|clear` toggles an in-memory timing log, useful when
+an agent does not start or the paste is not taken.
+
 ## References
 
 `<leader>ai` (or `:Rex ref`) drops just `path:12-20` into the agent's input,
@@ -86,6 +113,16 @@ require("rex-nvim").setup({
   prefix = "<leader>a",     -- keymap prefix
   keymaps = true,           -- set false to define your own
   clear_after_send = true,  -- comments are ephemeral by design
+  -- Started when no agent is running, then the prompt is sent to it. A command
+  -- ("claude") or a table; all keys but `cmd` are optional:
+  --   { cmd = "claude", split = "right", ratio = 50, float = false,
+  --     side = "right", submit = true, name = "claude" }
+  -- See "Starting an agent" below.
+  -- e.g. preferred_agent = "pi",
+  --  or  preferred_agent = { cmd = "claude", float = true, side = "right", ratio = 40 },
+  preferred_agent = nil,
+  agent_scope = "session",  -- or "tab": only look for agents in nvim's own tab
+  debug = false,            -- timing log: `:Rex debug on|off|log|clear`
 })
 ```
 
