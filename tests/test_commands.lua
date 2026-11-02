@@ -148,3 +148,12 @@ T.test("commands: setup() ensures the command exists", function()
   hn.setup({})
   T.eq(vim.fn.exists(":Rex"), 2)
 end)
+
+T.test("commands: extra arguments are rejected", function()
+  local notified
+  local orig = vim.notify
+  vim.notify = function(m) notified = m end
+  commands.run({ fargs = { "send", "foo" }, line1 = 1, line2 = 1 })
+  vim.notify = orig
+  T.ok(notified and notified:match("unexpected argument"), tostring(notified))
+end)

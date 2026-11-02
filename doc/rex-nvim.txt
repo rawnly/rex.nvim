@@ -120,6 +120,7 @@ rex-nvim.setup({opts}) ~
                               -- split when no agent is running, then sent to.
                               -- Or { cmd = "claude", split = "right", ratio = 50 }
     agent_scope = "session",  -- or "tab": only agents in nvim's own tab
+    debug = false,            -- log timings; see `:Rex debug log`
   })
 <
 
@@ -144,7 +145,7 @@ with a which-key group lives in |rex-nvim-installation|.
 ================================================================================
 COMMANDS                                                   *rex-nvim-commands*
 
-:Rex {comment, list, send, submit, ref} ~
+:Rex {comment, list, send, submit, ref, debug} ~
   Scoped command for the annotation actions, with subcommand completion.
   The command is registered when the plugin loads; registration is
   idempotent and happens both from the runtimepath plugin script and from
@@ -163,6 +164,15 @@ COMMANDS                                                   *rex-nvim-commands*
     chosen agent — no comment, no code, never a submit. :Rex ref targets
     the cursor line; :'<,'>Rex ref the visual selection; an explicit
     range like :5,10Rex ref is honored.
+
+:Rex debug [on|off|log|clear]
+    Toggle the in-memory timing log, open it in a split, or clear it.
+    With no argument: show the log if enabled, else enable.
+
+    `preferred_agent` may be a string, an argv list, or { cmd, name, split,
+    ratio }. `name` is the process name used to recognise the agent later
+    (needed for wrappers like `npx`). A freshly started agent is never
+    auto-submitted: the prompt is pasted and you press Enter yourself.
 
 Run :Rex with no subcommand (or an unknown one) for an error listing
 the valid subcommands.

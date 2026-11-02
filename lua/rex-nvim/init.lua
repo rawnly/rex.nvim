@@ -41,7 +41,13 @@ end
 
 function M.setup(config)
   M.config = vim.tbl_deep_extend("force", M.config, config or {})
-  if M.config.debug then require("rex-nvim.debug").set(true) end
+  if config and config.debug ~= nil then require("rex-nvim.debug").set(config.debug) end
+  if M.config.agent_scope ~= "session" and M.config.agent_scope ~= "tab" then
+    vim.notify(string.format("rex-nvim: invalid agent_scope %q (expected \"session\" or \"tab\"); using \"session\"",
+      tostring(M.config.agent_scope)), vim.log.levels.WARN)
+    M.config.agent_scope = "session"
+  end
+  agents.register(agents.normalize_preferred(M.config.preferred_agent))
   -- Ensure :Rex is registered (also done from plugin/rex-nvim.lua).
   require("rex-nvim.commands").register()
   -- Default keymaps stay opt-out (keymaps = true) for backward compatibility.
@@ -133,8 +139,14 @@ end
 -- all live in exactly one place. `build_payload(agent)` runs once the agent is
 -- resolved -- paths are shortened against that agent's cwd. `on_sent(agent,
 -- payload)` runs only after a successful dispatch.
+local starting = false
+
 local function deliver_to_agent(build_payload, opts, on_sent)
   local dbg = require("rex-nvim.debug")
+  if starting then
+    vim.notify("rex-nvim: agent is still starting — try again in a moment", vim.log.levels.WARN)
+    return
+  end
   dbg.begin("deliver")
   local agent_list, err = agents.list()
   dbg.log("initial agents.list: %d agent(s)", agent_list and #agent_list or 0)
@@ -145,38 +157,61 @@ local function deliver_to_agent(build_payload, opts, on_sent)
   if M.config.agent_scope == "tab" then
     agent_list = vim.tbl_filter(function(a) return a.same_window end, agent_list)
   end
-  local function deliver(agent)
+  -- `fresh` = we just spawned it: its screen may still be a startup dialog
+  -- (trust prompt, login), so never auto-submit and verify the paste landed.
+  local function deliver(agent, fresh)
     if agent.status == "working" then
       vim.notify("rex-nvim: " .. agents.display(agent) .. " is working — sending anyway", vim.log.levels.WARN)
     end
     local payload = build_payload(agent)
+    if not payload then return end
+    local send_opts = opts
+    if fresh then send_opts = vim.tbl_extend("force", opts or {}, { submit = false }) end
+    local before = fresh and agents.capture(agent.block_id) or nil
     dbg.log("dispatching %d bytes to %s", #payload, agent.block_id)
-    local ok, derr = dispatch.send(agent.block_id, payload, opts)
+    local ok, derr = dispatch.send(agent.block_id, payload, send_opts)
     dbg.log("dispatch done (ok=%s)", tostring(ok))
     if not ok then
       vim.notify("rex-nvim: " .. derr, vim.log.levels.ERROR)
       return
     end
-    on_sent(agent, payload)
+    if not fresh then return on_sent(agent, payload) end
+    vim.defer_fn(function()
+      if agents.capture(agent.block_id) == before then
+        vim.notify("rex-nvim: " .. agent.title .. " did not take the paste (still on its startup screen?) — comments kept",
+          vim.log.levels.ERROR)
+        return
+      end
+      on_sent(agent, payload)
+      if opts and opts.submit then
+        vim.notify("rex-nvim: agent was just started — pasted but not submitted; review and press Enter",
+          vim.log.levels.WARN)
+      end
+    end, 300)
   end
   if #agent_list == 0 then
     local preferred = agents.normalize_preferred(M.config.preferred_agent)
-    if preferred then
-      local block_id, serr = agents.spawn(preferred)
-      if not block_id then
-        vim.notify("rex-nvim: " .. serr, vim.log.levels.ERROR)
-        return
-      end
-      vim.notify("rex-nvim: starting " .. preferred.cmd .. "…")
-      agents.await(block_id, nil, function(agent, aerr)
-        if not agent then
-          vim.notify("rex-nvim: " .. aerr, vim.log.levels.ERROR)
-          return
-        end
-        deliver(agent)
-      end)
+    if not preferred then
+      local where = M.config.agent_scope == "tab" and "in this tab" or "in this Rex session"
+      vim.notify("rex-nvim: no agents found " .. where, vim.log.levels.WARN)
       return
     end
+    local block_id, serr = agents.spawn(preferred)
+    if not block_id then
+      vim.notify("rex-nvim: " .. serr, vim.log.levels.ERROR)
+      return
+    end
+    vim.notify("rex-nvim: starting " .. preferred.cmd .. "…")
+    starting = true
+    agents.await(block_id, nil, function(agent, aerr)
+      starting = false
+      if not agent then
+        vim.notify("rex-nvim: " .. aerr, vim.log.levels.ERROR)
+        return
+      end
+      deliver(agent, true)
+    end)
+    return
   end
   -- Skip the picker when the target is unambiguous (the common one-agent case);
   -- fall back to the picker only when 2+ agents could plausibly be meant.
@@ -189,27 +224,35 @@ local function deliver_to_agent(build_payload, opts, on_sent)
 end
 
 function M.send_all(opts)
-  local list = comments.list()
-  if #list == 0 then
+  local first = comments.list()
+  if #first == 0 then
     vim.notify("rex-nvim: no comments to send", vim.log.levels.INFO)
     return
   end
-  local items = {}
-  for _, c in ipairs(list) do
-    table.insert(items, { comment = c, snippet = comments.snippet(c.id) })
-  end
-  local first_file = list[1].file
+  local first_file = first[1].file
   local cwd = first_file ~= "" and vim.fn.fnamemodify(first_file, ":h") or nil
   local header_context = M._git_context(cwd)
+  local sent = {}
   deliver_to_agent(function(agent)
+    -- Read comments now, not before an async wait, so edits/deletes made while
+    -- an agent was starting are respected.
+    sent = comments.list()
+    if #sent == 0 then
+      vim.notify("rex-nvim: no comments to send", vim.log.levels.INFO)
+      return nil
+    end
+    local items = {}
+    for _, c in ipairs(sent) do
+      table.insert(items, { comment = c, snippet = comments.snippet(c.id) })
+    end
     return prompt.format(items, { header_context = header_context, cwd = agent.cwd })
   end, opts, function(agent)
     if M.config.clear_after_send then
-      for _, c in ipairs(list) do
+      for _, c in ipairs(sent) do
         M.delete_comment(c)
       end
     end
-    vim.notify(string.format("rex-nvim: sent %d comment(s) to %s", #list, agent.title))
+    vim.notify(string.format("rex-nvim: sent %d comment(s) to %s", #sent, agent.title))
   end)
 end
 
@@ -232,7 +275,7 @@ function M.ref_range(start_line, end_line)
     -- A reference points at the file on disk, so unwritten changes are
     -- invisible to whoever opens it. Worth saying out loud; not worth blocking
     -- over. Only after a send, so a cancelled picker stays silent.
-    if vim.bo[bufnr].modified then
+    if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified then
       vim.notify("rex-nvim: buffer has unsaved changes — the agent reads the file on disk",
         vim.log.levels.WARN)
     end

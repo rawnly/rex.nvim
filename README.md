@@ -93,6 +93,7 @@ require("rex-nvim").setup({
   --  or  preferred_agent = { cmd = "pi", split = "right", ratio = 40 },
   preferred_agent = nil,
   agent_scope = "session",  -- or "tab": only look for agents in nvim's own tab
+  debug = false,            -- timing log: `:Rex debug on|off|log|clear`
 })
 ```
 

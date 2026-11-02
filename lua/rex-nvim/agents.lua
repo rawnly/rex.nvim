@@ -29,6 +29,36 @@ local function program_name(fg)
   return vim.fs.basename((name:gsub("^%-", "")))
 end
 
+local shells = { sh = true, bash = true, zsh = true, fish = true, dash = true, nu = true }
+-- Launchers whose own name says nothing about the agent they run.
+local wrappers = { npx = true, bunx = true, env = true, node = true, pnpm = true, yarn = true,
+  uvx = true, sudo = true, python = true, python3 = true, deno = true, bun = true }
+
+-- Describe one block as an agent, or nil. Returns (agent_or_nil, alive).
+-- `force` accepts any non-shell foreground program (the block is known to be
+-- the agent we spawned, whatever its process is called).
+local function describe(exec, b, here_window, force)
+  local proc = call(exec, b.block_id, "process")
+  if not proc then return nil, false end
+  local fg = proc.foreground or {}
+  local status = root_status(call(exec, b.block_id, "program_status"), fg)
+  local name = program_name(fg)
+  local known = vim.list_contains(M.known, name)
+  if not (status or known or (force and fg.pid and name ~= "" and not shells[name])) then
+    return nil, true
+  end
+  local kind = status and status.effective_app or name
+  return {
+    block_id = b.block_id,
+    window_id = b.window_id,
+    same_window = here_window ~= nil and b.window_id == here_window,
+    kind = kind ~= "" and kind or "unknown",
+    status = status and status.state or "unknown",
+    cwd = fg.cwd or "",
+    title = b.label and b.label ~= "" and b.label ~= "shell" and b.label or kind,
+  }, true
+end
+
 -- Agents in the current Rex session: every block other than our own whose
 -- foreground program is a known agent or reports a status.
 function M.list(exec)
@@ -49,21 +79,8 @@ function M.list(exec)
   local out = {}
   for _, b in ipairs(decoded.blocks or {}) do
     if b.block_id ~= here then
-      local fg = (call(exec, b.block_id, "process") or {}).foreground or {}
-      local status = root_status(call(exec, b.block_id, "program_status"), fg)
-      local name = program_name(fg)
-      if status or vim.list_contains(M.known, name) then
-        local kind = status and status.effective_app or name
-        table.insert(out, {
-          block_id = b.block_id,
-          window_id = b.window_id,
-          same_window = here_window ~= nil and b.window_id == here_window,
-          kind = kind ~= "" and kind or "unknown",
-          status = status and status.state or "unknown",
-          cwd = fg.cwd or "",
-          title = b.label and b.label ~= "" and b.label ~= "shell" and b.label or kind,
-        })
-      end
+      local agent = describe(exec, b, here_window)
+      if agent then table.insert(out, agent) end
     end
   end
   table.sort(out, function(x, y) return x.title < y.title end)
@@ -85,16 +102,58 @@ function M.resolve(list)
   return nil
 end
 
--- Normalize the `preferred_agent` option: a command string ("claude") or a
--- table { cmd = "claude", split = "right", ratio = 50 }.
-function M.normalize_preferred(opt)
-  if type(opt) == "string" and opt ~= "" then opt = { cmd = opt } end
-  if type(opt) ~= "table" or type(opt.cmd) ~= "string" or opt.cmd == "" then return nil end
-  return { cmd = opt.cmd, split = opt.split or "right", ratio = opt.ratio or 50 }
+-- Quote-aware split of a command line into argv.
+local function split_args(str)
+  local out, cur, q = {}, nil, nil
+  for i = 1, #str do
+    local ch = str:sub(i, i)
+    if q then
+      if ch == q then q = nil else cur = cur .. ch end
+    elseif ch == '"' or ch == "'" then
+      q = ch
+      cur = cur or ""
+    elseif ch:match("%s") then
+      if cur then out[#out + 1] = cur; cur = nil end
+    else
+      cur = (cur or "") .. ch
+    end
+  end
+  if cur then out[#out + 1] = cur end
+  return out
 end
 
--- Open `preferred.cmd` in a new, unfocused split beside this nvim's block (so
--- it lands in the same tab). Returns the new block id.
+-- Normalize the `preferred_agent` option: a command string ("claude"), an argv
+-- list, or a table { cmd = "claude" | {argv...}, name = "claude", split = "right",
+-- ratio = 50 }. `name` is the process name used to recognise the agent later.
+function M.normalize_preferred(opt)
+  if type(opt) == "string" or (type(opt) == "table" and opt[1] ~= nil) then opt = { cmd = opt } end
+  if type(opt) ~= "table" then return nil end
+  local argv
+  if type(opt.cmd) == "string" then
+    argv = split_args(opt.cmd)
+  elseif type(opt.cmd) == "table" then
+    argv = vim.tbl_filter(function(x) return type(x) == "string" and x ~= "" end, opt.cmd)
+  end
+  if not argv or #argv == 0 then return nil end
+  return {
+    cmd = table.concat(argv, " "),
+    argv = argv,
+    name = opt.name or vim.fs.basename(argv[1]),
+    explicit_name = opt.name ~= nil,
+    split = opt.split or "right",
+    ratio = opt.ratio or 50,
+  }
+end
+
+-- Make a configured agent recognisable by process name. Called from setup().
+function M.register(preferred)
+  if not preferred then return end
+  if wrappers[preferred.name] and not preferred.explicit_name then return end
+  if not vim.list_contains(M.known, preferred.name) then table.insert(M.known, preferred.name) end
+end
+
+-- Open the preferred agent in a new, unfocused split beside this nvim's block
+-- (so it lands in the same tab). Returns the new block id.
 function M.spawn(preferred, exec)
   exec = exec or exec_mod.default_exec
   local here = vim.env.REX_BLOCK
@@ -104,7 +163,7 @@ function M.spawn(preferred, exec)
   local argv = {
     "rex", "split", "-b", here, "--split", preferred.split, "--ratio", tostring(preferred.ratio),
     "--focus=false", "--json", "--label", preferred.cmd, "-c", vim.fn.getcwd(), "--",
-    unpack(vim.split(preferred.cmd, "%s+", { trimempty = true })),
+    unpack(preferred.argv),
   }
   require("rex-nvim.debug").log("spawn: rex split %s", preferred.cmd)
   local r = exec(argv)
@@ -112,15 +171,19 @@ function M.spawn(preferred, exec)
   local ok, decoded = pcall(vim.json.decode, r.stdout)
   local id = ok and type(decoded) == "table" and decoded.block_ids and decoded.block_ids[1]
   if not id then return nil, "rex split: unparseable JSON" end
-  -- A custom command isn't in `known`; make sure we can recognise it.
-  local name = vim.fs.basename(vim.split(preferred.cmd, "%s+", { trimempty = true })[1])
-  if not vim.list_contains(M.known, name) then table.insert(M.known, name) end
   return id
 end
 
--- Poll until `block_id` shows up as an agent, then until its screen has been
--- drawn and stopped changing (the TUI is up and its input box can take a
--- paste), then call cb(agent). On timeout call cb(nil, err). Non-blocking.
+-- Current screen of a block, trimmed ("" on failure).
+function M.capture(block_id, exec)
+  exec = exec or exec_mod.default_exec
+  local r = exec({ "rex", "capture", "-b", block_id, "--trim" })
+  return r.code == 0 and vim.trim(r.stdout) or ""
+end
+
+-- Poll only `block_id` until its program is up and its screen has been drawn
+-- and stopped changing, then call cb(agent). On timeout, or if the pane closes
+-- (the command failed to start), call cb(nil, err). The deadline is wall-clock.
 -- Detection alone isn't enough: the process is the foreground program well
 -- before it has rendered, and anything pasted that early is lost.
 function M.await(block_id, opts, cb, exec)
@@ -129,48 +192,43 @@ function M.await(block_id, opts, cb, exec)
     timeout_ms = 20000, interval_ms = 250, settle_ms = 500, stable_polls = 3,
   }, opts or {})
   local dbg = require("rex-nvim.debug")
-  local waited, polls = 0, 0
+  local deadline = vim.uv.now() + opts.timeout_ms
+  local polls, dead = 0, 0
   local found, last, stable = nil, nil, 0
 
-  local function tick(fn)
-    if waited >= opts.timeout_ms then
-      dbg.log("await: timed out after %d polls (%s)", polls, found and "screen never settled" or "agent never detected")
+  local function again(fn)
+    if vim.uv.now() >= deadline then
+      dbg.log("await: timed out after %d polls", polls)
       cb(nil, found and "timed out waiting for the agent to finish starting"
         or "timed out waiting for the agent to start")
       return
     end
-    waited = waited + opts.interval_ms
     vim.defer_fn(fn, opts.interval_ms)
   end
 
   local function poll()
     polls = polls + 1
-    if not found then
-      local list = M.list(exec)
-      dbg.log("await poll #%d: %d agent(s) listed, waiting for %s", polls, list and #list or 0, block_id)
-      for _, a in ipairs(list or {}) do
-        if a.block_id == block_id then
-          found = a
-          dbg.log("await: agent detected (kind=%s status=%s); waiting for screen to settle", a.kind, a.status)
-        end
+    local agent, alive = describe(exec, { block_id = block_id }, nil, true)
+    if not alive then
+      dead = dead + 1
+      if dead >= 3 then
+        cb(nil, "the agent pane closed before it started (is the command valid?)")
+        return
       end
-      if not found then return tick(poll) end
+      return again(poll)
     end
-    local r = exec({ "rex", "capture", "-b", block_id, "--trim" })
-    local screen = r.code == 0 and vim.trim(r.stdout) or ""
-    if screen ~= "" and screen == last then
-      stable = stable + 1
-    else
-      stable = 0
-    end
+    dead = 0
+    if agent then found = agent end
+    if not found then return again(poll) end
+    local screen = M.capture(block_id, exec)
+    if screen ~= "" and screen == last then stable = stable + 1 else stable = 0 end
     last = screen
     dbg.log("await poll #%d: screen %d bytes, stable %d/%d", polls, #screen, stable, opts.stable_polls)
     if stable >= opts.stable_polls then
-      dbg.log("await: screen settled, sending after %dms", opts.settle_ms)
       vim.defer_fn(function() cb(found) end, opts.settle_ms)
       return
     end
-    tick(poll)
+    again(poll)
   end
   poll()
 end

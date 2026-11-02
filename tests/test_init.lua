@@ -398,3 +398,11 @@ end)
 T.test("init: agent_scope defaults to session", function()
   T.eq(hn.config.agent_scope, "session")
 end)
+
+T.test("init: invalid agent_scope falls back to session", function()
+  local orig = vim.notify
+  vim.notify = function() end
+  hn.setup({ keymaps = false, agent_scope = "window" })
+  vim.notify = orig
+  T.eq(hn.config.agent_scope, "session")
+end)

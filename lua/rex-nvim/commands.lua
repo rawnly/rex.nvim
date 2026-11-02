@@ -1,4 +1,4 @@
--- :Rex user command with scoped subcommands (comment/list/send/submit/ref)
+-- :Rex user command with scoped subcommands (comment/list/send/submit/ref/debug)
 -- and completions. Private module; the public API lives in rex-nvim.init.
 local M = {}
 
@@ -13,7 +13,7 @@ function M.register()
   end, {
     nargs = "*",
     range = true,
-    desc = "rex-nvim: comment, list, send, or submit code annotations; reference a line range",
+    desc = "rex-nvim: comment, list, send, or submit code annotations; reference a line range; debug log",
     complete = function(arg_lead, cmdline)
       return require("rex-nvim.commands").complete(arg_lead, cmdline)
     end,
@@ -47,6 +47,12 @@ end
 function M.run(opts)
   local hn = require("rex-nvim")
   local sub = opts.fargs[1]
+  local max_args = sub == "debug" and 2 or 1
+  if vim.list_contains(subcommands, sub) and #opts.fargs > max_args then
+    vim.notify(string.format("Rex %s: unexpected argument %q", sub, opts.fargs[max_args + 1]),
+      vim.log.levels.ERROR, { title = "rex-nvim" })
+    return
+  end
   if sub == "comment" then
     hn.comment_range(opts.line1, opts.line2)
   elseif sub == "ref" then

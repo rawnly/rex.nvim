@@ -102,19 +102,77 @@ T.test("agents: display row leads with agent kind", function()
   T.eq(row, "pi · idle · proj")
 end)
 
-T.test("agents: normalize_preferred accepts a string or table", function()
-  T.eq(agents.normalize_preferred("claude"), { cmd = "claude", split = "right", ratio = 50 })
-  T.eq(agents.normalize_preferred({ cmd = "pi", split = "below", ratio = 30 }),
-    { cmd = "pi", split = "below", ratio = 30 })
+T.test("agents: normalize_preferred accepts a string, argv list, or table", function()
+  local n = agents.normalize_preferred("claude")
+  T.eq({ n.cmd, n.name, n.split, n.ratio }, { "claude", "claude", "right", 50 })
+  n = agents.normalize_preferred({ cmd = "pi", split = "below", ratio = 30 })
+  T.eq({ n.cmd, n.split, n.ratio }, { "pi", "below", 30 })
+  T.eq(agents.normalize_preferred({ "claude", "--x" }).argv, { "claude", "--x" })
+  T.eq(agents.normalize_preferred('claude --p "be terse"').argv, { "claude", "--p", "be terse" })
   T.eq(agents.normalize_preferred(nil), nil)
   T.eq(agents.normalize_preferred(""), nil)
+  T.eq(agents.normalize_preferred("   "), nil)
+end)
+
+T.test("agents: register skips wrapper names unless explicit", function()
+  local before = #agents.known
+  agents.register(agents.normalize_preferred("npx foo"))
+  T.eq(#agents.known, before)
+  agents.register(agents.normalize_preferred({ cmd = "npx foo", name = "fooagent" }))
+  T.ok(vim.list_contains(agents.known, "fooagent"))
+  agents.known[#agents.known] = nil
+end)
+
+local function fake_exec(state)
+  return function(argv)
+    local joined = table.concat(argv, " ")
+    if joined:find("block call .* process") then
+      if state.gone then return { code = 1, stdout = "", stderr = "no block" } end
+      return { code = 0, stdout = vim.json.encode({ foreground = { pid = 5, name = "weirdtool", cwd = "/x" } }), stderr = "" }
+    elseif joined:find("program_status") then
+      return { code = 0, stdout = "{}", stderr = "" }
+    elseif argv[2] == "capture" then
+      return { code = 0, stdout = state.screen or "hello", stderr = "" }
+    end
+    return { code = 1, stdout = "", stderr = "?" }
+  end
+end
+
+T.test("agents: await calls back once the screen settles", function()
+  local got
+  agents.await("block:n", { interval_ms = 5, settle_ms = 5, stable_polls = 2 },
+    function(a, e) got = { a = a, e = e } end, fake_exec({}))
+  vim.wait(2000, function() return got ~= nil end, 5)
+  T.ok(got and got.a, "agent expected")
+  T.eq(got.a.block_id, "block:n")
+end)
+
+T.test("agents: await fails fast when the pane closes", function()
+  local got
+  agents.await("block:n", { interval_ms = 5, timeout_ms = 5000 },
+    function(a, e) got = { a = a, e = e } end, fake_exec({ gone = true }))
+  vim.wait(2000, function() return got ~= nil end, 5)
+  T.ok(got and got.e and got.e:match("closed"), "expected closed error")
+end)
+
+T.test("agents: await times out if the screen never settles", function()
+  local n, got = 0, nil
+  local base = fake_exec({})
+  agents.await("block:n", { interval_ms = 5, timeout_ms = 60, stable_polls = 2 },
+    function(a, e) got = { a = a, e = e } end,
+    function(argv)
+      if argv[2] == "capture" then n = n + 1; return { code = 0, stdout = "x" .. n, stderr = "" } end
+      return base(argv)
+    end)
+  vim.wait(2000, function() return got ~= nil end, 5)
+  T.ok(got and got.e and got.e:match("timed out"), "expected timeout")
 end)
 
 T.test("agents: spawn splits beside our block unfocused and returns the new id", function()
   local saved = vim.env.REX_BLOCK
   vim.env.REX_BLOCK = "block:me"
   local seen
-  local id = agents.spawn({ cmd = "claude --foo", split = "right", ratio = 50 }, function(argv)
+  local id = agents.spawn(agents.normalize_preferred("claude --foo"), function(argv)
     seen = argv
     return { code = 0, stdout = vim.json.encode({ block_ids = { "block:new" } }), stderr = "" }
   end)
@@ -130,7 +188,7 @@ end)
 T.test("agents: spawn reports a failing rex split", function()
   local saved = vim.env.REX_BLOCK
   vim.env.REX_BLOCK = "block:me"
-  local id, err = agents.spawn({ cmd = "claude", split = "right", ratio = 50 },
+  local id, err = agents.spawn(agents.normalize_preferred("claude"),
     function() return { code = 1, stdout = "", stderr = "boom" } end)
   vim.env.REX_BLOCK = saved
   T.eq(id, nil)
