@@ -1,0 +1,30 @@
+[package]
+name = "herdr-nvim"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "0.8"
+toml_edit = "0.22"
+anyhow = "1"
+crossterm = "0.28"
+# fff-search backend for the picker's fuzzy fallback tier. Users install
+# prebuilt release binaries, so the extra dependency weight is a CI/build
+# cost, not a user-facing one.
+fff-search = "0.10.6"
+
+[target.'cfg(unix)'.dependencies]
+# tcflush: keys typed into an nvim pane before nvim attaches are dropped.
+libc = "0.2"
+
+[[example]]
+name = "fff_cold"
+
+[dev-dependencies]
+regex = "1"
+
+[profile.release]
+lto = true
+strip = true
