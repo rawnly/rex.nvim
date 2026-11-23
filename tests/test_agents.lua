@@ -58,9 +58,9 @@ T.test("agents: lists agent blocks in the session, skipping our own", function()
     T.eq(#list, 2)
     -- sorted by title: "pi" < "review"
     T.eq(list[1], { block_id = "b:pi", window_id = "w:1", same_window = true,
-      kind = "pi", status = "unknown", cwd = "/tmp/proj-a", title = "pi" })
+      kind = "pi", program = "pi", status = "unknown", cwd = "/tmp/proj-a", title = "pi" })
     T.eq(list[2], { block_id = "b:claude", window_id = "w:2", same_window = false,
-      kind = "claude-code", status = "working", cwd = "/tmp/proj-b", title = "review" })
+      kind = "claude-code", program = "claude", status = "working", cwd = "/tmp/proj-b", title = "review" })
   end)
 end)
 
@@ -115,4 +115,28 @@ end)
 T.test("agents: display row leads with agent kind", function()
   local row = agents.display({ kind = "pi", title = "π - a", status = "idle", cwd = "/x/y/proj" })
   T.eq(row, "pi · idle · proj")
+end)
+
+T.test("agents: resolve prefers the preferred program over the picker", function()
+  local list = {
+    { block_id = "b:1", program = "pi", kind = "pi" },
+    { block_id = "b:2", program = "claude", kind = "claude-code" },
+  }
+  T.eq(agents.resolve(list, "claude").block_id, "b:2")
+  T.eq(agents.resolve(list, "claude-code").block_id, "b:2")
+  T.eq(agents.resolve(list, "codex"), nil, "no match falls back to the usual rules")
+end)
+
+T.test("agents: resolve narrows several preferred matches to nvim's tab", function()
+  local list = {
+    { block_id = "b:1", program = "claude", same_window = false },
+    { block_id = "b:2", program = "claude", same_window = true },
+    { block_id = "b:3", program = "pi", same_window = true },
+  }
+  T.eq(agents.resolve(list, "claude").block_id, "b:2")
+end)
+
+T.test("agents: in_tab keeps only agents in nvim's tab", function()
+  local list = { { block_id = "b:1", same_window = true }, { block_id = "b:2", same_window = false } }
+  T.eq(agents.in_tab(list), { { block_id = "b:1", same_window = true } })
 end)

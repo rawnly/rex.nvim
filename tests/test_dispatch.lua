@@ -57,3 +57,20 @@ T.test("dispatch: failed Enter returns err", function()
     T.ok(err:match("enter"))
   end)
 end)
+
+T.test("dispatch: focus focuses the agent's block", function()
+  with_session(function()
+    local got
+    local rpc = { call = function(session, method, payload) got = { session, method, payload }; return {} end }
+    T.ok(dispatch.focus("b:1", rpc))
+    T.eq(got, { "s:1", "session.focus_block", { session_id = "s:1", block_id = "b:1" } })
+  end)
+end)
+
+T.test("dispatch: focus failure returns err", function()
+  with_session(function()
+    local ok, err = dispatch.focus("b:1", { call = function() return nil, "not_found" end })
+    T.eq(ok, false)
+    T.eq(err, "focus failed: not_found")
+  end)
+end)

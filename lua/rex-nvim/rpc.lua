@@ -85,7 +85,7 @@ local function send(c, tbl)
 end
 
 local function on_message(c, text)
-  local ok, m = pcall(vim.json.decode, text)
+  local ok, m = pcall(vim.json.decode, text, { luanil = { object = true, array = true } })
   if not ok or type(m) ~= "table" then return end
   if m.type == "welcome" then
     c.welcome = m

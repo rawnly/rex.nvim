@@ -4,8 +4,21 @@ local prompt = require("rex-nvim.prompt")
 local agents = require("rex-nvim.agents")
 local dispatch = require("rex-nvim.dispatch")
 local ui = require("rex-nvim.ui")
+local spawn = require("rex-nvim.spawn")
 
-M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true }
+M.config = {
+  prefix = "<leader>a",
+  keymaps = true,
+  clear_after_send = true,
+  -- Where to look for agents: "session" (every tab) or "tab" (nvim's tab).
+  agent_scope = "session",
+  -- Agent to prefer, and to start when none is found: false, a command
+  -- ("claude", { "codex", "--full-auto" }), or
+  -- { cmd =, split = "right", ratio = 50, float = false, submit = false }.
+  preferred_agent = false,
+  -- Move Rex's focus to the agent after a send.
+  focus_agent = false,
+}
 
 -- Callback of each default keymap this plugin set, by mode and keys. setup()
 -- can run more than once (the sidebar daemon calls it again after the user's
@@ -32,6 +45,10 @@ end
 
 function M.setup(config)
   M.config = vim.tbl_deep_extend("force", M.config, config or {})
+  if M.config.preferred_agent then
+    local _, err = spawn.normalize(M.config.preferred_agent)
+    if err then vim.notify("rex-nvim: " .. err, vim.log.levels.ERROR) end
+  end
   -- Ensure :Rex is registered (also done from plugin/rex-nvim.lua).
   require("rex-nvim.commands").register()
   -- Default keymaps stay opt-out (keymaps = true) for backward compatibility.
@@ -129,6 +146,8 @@ local function deliver_to_agent(build_payload, opts, on_sent)
     vim.notify("rex-nvim: " .. err, vim.log.levels.ERROR)
     return
   end
+  if M.config.agent_scope == "tab" then agent_list = agents.in_tab(agent_list) end
+  local preferred = M.config.preferred_agent and spawn.normalize(M.config.preferred_agent)
   local function deliver(agent)
     if agent.status == "working" then
       vim.notify("rex-nvim: " .. agents.display(agent) .. " is working — sending anyway", vim.log.levels.WARN)
@@ -140,10 +159,30 @@ local function deliver_to_agent(build_payload, opts, on_sent)
       return
     end
     on_sent(agent, payload)
+    if M.config.focus_agent then
+      local fok, ferr = dispatch.focus(agent.block_id)
+      if not fok then vim.notify("rex-nvim: " .. ferr, vim.log.levels.WARN) end
+    end
+  end
+  -- Nobody to send to: start the preferred agent and send once it's ready.
+  -- A fresh agent has nothing else in its input, so preferred_agent.submit
+  -- sends this first message right away (references are never submitted).
+  if #agent_list == 0 and M.config.preferred_agent then
+    spawn.start(M.config.preferred_agent, function(spawned, serr)
+      if not spawned then
+        vim.notify("rex-nvim: " .. serr, vim.log.levels.ERROR)
+        return
+      end
+      if preferred and preferred.submit and not opts.ref then
+        opts = vim.tbl_extend("force", opts, { submit = true })
+      end
+      deliver(spawned)
+    end)
+    return
   end
   -- Skip the picker when the target is unambiguous (the common one-agent case);
   -- fall back to the picker only when 2+ agents could plausibly be meant.
-  local agent = agents.resolve(agent_list)
+  local agent = agents.resolve(agent_list, preferred and preferred.name)
   if agent then
     deliver(agent)
   else
@@ -190,7 +229,7 @@ function M.ref_range(start_line, end_line)
   local item = { file = file, start_line = start_line, end_line = end_line }
   deliver_to_agent(function(agent)
     return prompt.format_ref(item, { cwd = agent.cwd })
-  end, { submit = false }, function(_, payload)
+  end, { submit = false, ref = true }, function(_, payload)
     vim.notify("rex-nvim: referenced " .. vim.trim(payload))
     -- A reference points at the file on disk, so unwritten changes are
     -- invisible to whoever opens it. Worth saying out loud; not worth blocking

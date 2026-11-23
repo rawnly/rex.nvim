@@ -299,7 +299,7 @@ end
 
 function M.pick_agent(agent_list, on_choice)
   if #agent_list == 0 then
-    vim.notify("rex-nvim: no agents found in this Rex session", vim.log.levels.WARN)
+    vim.notify("rex-nvim: no agents found (set preferred_agent to start one)", vim.log.levels.WARN)
     return
   end
   -- Pure selection: send-time policy (e.g. the "working" warning) lives in the

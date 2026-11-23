@@ -117,8 +117,26 @@ rex-nvim.setup({opts}) ~
     prefix = "<leader>a",     -- prefix for the default keymaps
     keymaps = true,           -- set false to bind your own
     clear_after_send = true,  -- clear comments after a successful send
+    agent_scope = "session",  -- or "tab": only agents in nvim's tab count
+    preferred_agent = false,  -- agent to prefer, and to start when none is found
+    focus_agent = false,      -- move Rex's focus to the agent after a send
   })
 <
+
+  `preferred_agent` is false, a command (`"claude"`, `{ "codex", "-a" }`), or
+  a table with these fields:
+    cmd     command string or argv list (required)
+    split   right, left, below or above (default right)
+    ratio   percent of the space the agent gets (default 50)
+    float   true for a floating pane on that edge instead of a split
+    submit  true to submit the message that started the agent
+
+  Among several agents, the one running `cmd` is chosen without a picker.
+  When a send finds no agent in scope, `cmd` starts beside nvim, in nvim's
+  cwd, and the send goes out once the agent turns on bracketed paste (it is
+  reading input then). `submit` applies to that send only; references are
+  never submitted. If the agent exits first, or isn't ready within 20
+  seconds, the send fails with an error and the pane stays open.
 
 Suggested keymaps: ~
 
