@@ -1,24 +1,22 @@
 local M = {}
-local exec_mod = require("rex-nvim.exec")
 
--- Bracketed paste keeps a multi-line payload in the agent's input box instead
--- of submitting it line by line.
-local function paste(text)
-  return "\27[200~" .. text .. "\27[201~"
-end
+-- A paste event: Rex wraps it in bracketed-paste markers when the program
+-- asked for them, which keeps a multi-line payload in the agent's input box
+-- instead of submitting it line by line.
+local ENTER = { key = "enter", mods = "", consumed_mods = "", text = "\r", unshifted_codepoint = 13, composing = false, action = "press" }
 
-function M.send(block_id, text, opts, exec)
+function M.send(block_id, text, opts, rpc)
   opts = opts or {}
-  exec = exec or exec_mod.default_exec
-  local r = exec({ "rex", "send", "-b", block_id, paste(text) })
-  if r.code ~= 0 then
-    return false, "rex send failed: " .. (r.stderr ~= "" and vim.trim(r.stderr) or ("exit " .. r.code))
+  rpc = rpc or require("rex-nvim.rpc")
+  local session = vim.env.REX_SESSION
+  local function event(type, payload)
+    return rpc.call(session, "block.event", { session_id = session, block_id = block_id, event = { type = type, payload = payload } })
   end
+  local ok, err = event("paste", { text = text })
+  if not ok then return false, "paste failed: " .. err end
   if opts.submit then
-    r = exec({ "rex", "send-key", "-b", block_id, "enter" })
-    if r.code ~= 0 then
-      return false, "rex send-key failed: " .. (r.stderr ~= "" and vim.trim(r.stderr) or ("exit " .. r.code))
-    end
+    ok, err = event("key", ENTER)
+    if not ok then return false, "enter failed: " .. err end
   end
   return true
 end

@@ -7,10 +7,11 @@ agent — with file:line and git context. Or send nothing but a file:line
 reference, dropped into a message you are still typing
 (|rex-nvim.ref_range()|).
 
-Agents are found with the `rex` CLI: every other pane (block) in the current
-session whose foreground program is a known agent, or that reports a status
-through Rex (OSC 7501), is a candidate. Text is pasted with `rex send`; a
-submit also presses Enter with `rex send-key`.
+Agents are found by asking the Rex server over its control socket
+(`REX_SERVER`); no `rex` process is spawned. Every other pane (block) in the
+current session whose foreground program is a known agent, or that reports a
+status through Rex (OSC 7501), is a candidate. Text is sent as a paste event;
+a submit also sends an Enter key event.
 
 Links:
 - Repository: https://github.com/rawnly/rex.nvim
@@ -60,7 +61,7 @@ REQUIREMENTS                                           *rex-nvim-requirements*
 
 - Neovim >= 0.10
 - nvim running inside a Rex session (`REX_SESSION` set)
-- The `rex` CLI available on PATH (lists agents, sends comments)
+- `REX_SERVER` set to the server's unix socket (Rex sets it in every pane)
 ================================================================================
 INSTALLATION                                           *rex-nvim-installation*
 
