@@ -394,3 +394,149 @@ T.test("init: ref_line and ref_selection resolve their own span", function()
   T.eq(sent[1], "span.lua:3 ", "ref_line targets the cursor line")
   T.eq(sent[2], "span.lua:2-4 ", "ref_selection targets the visual marks")
 end)
+
+-- Runs `fn` with agents.list returning `list`, spawn.start answering with
+-- `spawned`, and dispatch.send recording. Returns what was sent and spawned.
+local function with_agents(list, spawned, fn)
+  local dispatch = require("rex-nvim.dispatch")
+  local agents = require("rex-nvim.agents")
+  local spawn = require("rex-nvim.spawn")
+  local ui = require("rex-nvim.ui")
+  local rec = {}
+  local saved = { dispatch.send, agents.list, spawn.start, ui.pick_agent, vim.deepcopy(hn.config), dispatch.focus }
+  dispatch.focus = function(block) rec.focused = block; return true end
+  dispatch.send = function(block, _, opts) rec.sent, rec.opts = block, opts; return true end
+  agents.list = function() rec.listed = true; return vim.deepcopy(list) end
+  spawn.start = function(spec, cb) rec.spec = spec; cb(spawned) end
+  ui.pick_agent = function(l) rec.picker = l end
+  local ok, err = pcall(fn, rec)
+  dispatch.send, agents.list, spawn.start, ui.pick_agent, hn.config, dispatch.focus = unpack(saved)
+  if not ok then error(err, 0) end
+  return rec
+end
+
+local function one_comment(name)
+  comments.clear()
+  local b = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "alpha" })
+  vim.api.nvim_buf_set_name(b, name)
+  vim.api.nvim_set_current_buf(b)
+  comments.add(b, { start_line = 1, end_line = 1 }, "check this")
+end
+
+local fresh = { block_id = "b:new", title = "claude", program = "claude", status = "idle", cwd = "/tmp" }
+
+T.test("init: spawns the preferred agent when none is found", function()
+  one_comment("/tmp/hn-spawn-1.lua")
+  local rec = with_agents({}, fresh, function()
+    hn.config.preferred_agent = { cmd = "claude" }
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.spec, { cmd = "claude" })
+  T.eq(rec.sent, "b:new")
+  T.eq(rec.opts.submit, false, "submit stays off unless preferred_agent.submit")
+end)
+
+T.test("init: preferred_agent.submit submits the message that spawned it", function()
+  one_comment("/tmp/hn-spawn-2.lua")
+  local rec = with_agents({}, fresh, function()
+    hn.config.preferred_agent = { cmd = "claude", submit = true }
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.opts.submit, true)
+end)
+
+T.test("init: a reference to a spawned agent is never submitted", function()
+  one_comment("/tmp/hn-spawn-3.lua")
+  local rec = with_agents({}, fresh, function()
+    hn.config.preferred_agent = { cmd = "claude", submit = true }
+    hn.ref_range(1, 1)
+  end)
+  T.eq(rec.sent, "b:new")
+  T.eq(rec.opts.submit, false)
+end)
+
+T.test("init: agent_scope = tab ignores agents in other tabs and spawns", function()
+  one_comment("/tmp/hn-spawn-4.lua")
+  local rec = with_agents({ { block_id = "b:other", program = "claude", same_window = false } }, fresh, function()
+    hn.config.agent_scope = "tab"
+    hn.config.preferred_agent = "claude"
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.sent, "b:new")
+end)
+
+T.test("init: agent_scope = session uses an agent in another tab", function()
+  one_comment("/tmp/hn-spawn-5.lua")
+  local rec = with_agents({ { block_id = "b:other", program = "claude", same_window = false } }, fresh, function()
+    hn.config.preferred_agent = "claude"
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.spec, nil)
+  T.eq(rec.sent, "b:other")
+end)
+
+T.test("init: preferred_agent picks its program among several agents", function()
+  one_comment("/tmp/hn-spawn-6.lua")
+  local rec = with_agents({
+    { block_id = "b:pi", program = "pi", kind = "pi" },
+    { block_id = "b:claude", program = "claude", kind = "claude-code" },
+  }, fresh, function()
+    hn.config.preferred_agent = { cmd = "claude" }
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.picker, nil)
+  T.eq(rec.sent, "b:claude")
+end)
+
+T.test("init: without preferred_agent an empty session never spawns", function()
+  local rec = with_agents({}, fresh, function()
+    local b = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(b, "/tmp/hn-no-spawn.lua")
+    vim.api.nvim_set_current_buf(b)
+    hn.ref_range(1, 1)
+  end)
+  T.ok(rec.listed, "reached agent lookup")
+  T.eq(rec.spec, nil)
+end)
+
+T.test("init: focus_agent focuses the agent after a send", function()
+  one_comment("/tmp/hn-focus-1.lua")
+  local rec = with_agents({ { block_id = "b:claude", program = "claude" } }, fresh, function()
+    hn.config.focus_agent = true
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.focused, "b:claude")
+end)
+
+T.test("init: focus_agent focuses a freshly spawned agent", function()
+  one_comment("/tmp/hn-focus-2.lua")
+  local rec = with_agents({}, fresh, function()
+    hn.config.focus_agent = true
+    hn.config.preferred_agent = "claude"
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.focused, "b:new")
+end)
+
+T.test("init: focus stays in nvim by default", function()
+  one_comment("/tmp/hn-focus-3.lua")
+  local rec = with_agents({ { block_id = "b:claude", program = "claude" } }, fresh, function()
+    hn.send_all({ submit = false })
+  end)
+  T.eq(rec.focused, nil)
+end)
+
+T.test("init: a failed send does not move focus", function()
+  one_comment("/tmp/hn-focus-4.lua")
+  local dispatch = require("rex-nvim.dispatch")
+  local rec = with_agents({ { block_id = "b:claude", program = "claude" } }, fresh, function()
+    hn.config.focus_agent = true
+    dispatch.send = function() return false, "boom" end
+    local on = vim.notify
+    vim.notify = function() end
+    hn.send_all({ submit = false })
+    vim.notify = on
+  end)
+  T.eq(rec.focused, nil)
+end)

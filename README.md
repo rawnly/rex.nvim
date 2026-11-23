@@ -88,8 +88,30 @@ require("rex-nvim").setup({
   prefix = "<leader>a",     -- keymap prefix
   keymaps = true,           -- set false to define your own
   clear_after_send = true,  -- comments are ephemeral by design
+  agent_scope = "session",  -- or "tab": only agents in nvim's tab count
+  preferred_agent = false,  -- agent to prefer, and to start when none is found
+  focus_agent = false,      -- move Rex's focus to the agent after a send
 })
 ```
+
+`preferred_agent` is a command (`"claude"`, `{ "codex", "--full-auto" }`) or a
+table:
+
+```lua
+preferred_agent = {
+  cmd = "claude",
+  split = "right",  -- right | left | below | above
+  ratio = 30,       -- percent of the space the agent gets (default 50)
+  float = true,     -- a floating pane on that edge instead of a split
+  submit = true,    -- submit the message that started it
+},
+```
+
+With several agents around, the one running `cmd` wins without a picker.
+With none (in scope), it starts beside nvim, in nvim's cwd, and the send goes
+out as soon as it is ready to take a paste. `submit` only covers that first
+send; `:Rex ref` never submits. If the agent exits before it is ready, you get
+an error and its pane stays open so you can read why.
 
 ## Tests
 

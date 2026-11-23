@@ -21,4 +21,13 @@ function M.send(block_id, text, opts, rpc)
   return true
 end
 
+-- Moves Rex's focus to the agent's pane (split or floating).
+function M.focus(block_id, rpc)
+  rpc = rpc or require("rex-nvim.rpc")
+  local session = vim.env.REX_SESSION
+  local ok, err = rpc.call(session, "session.focus_block", { session_id = session, block_id = block_id })
+  if not ok then return false, "focus failed: " .. err end
+  return true
+end
+
 return M

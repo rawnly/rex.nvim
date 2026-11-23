@@ -58,6 +58,7 @@ function M.list(rpc)
         window_id = b.window_id,
         same_window = here_window ~= nil and b.window_id == here_window,
         kind = kind ~= "" and kind or "unknown",
+        program = name,
         status = status and status.state or "unknown",
         cwd = fg.cwd or "",
         title = b.label and b.label ~= "" and b.label ~= "shell" and b.label or kind,
@@ -68,19 +69,30 @@ function M.list(rpc)
   return out
 end
 
--- Resolve the one agent to target without a picker, or nil when it's ambiguous.
--- `list` is already session-scoped by M.list. Narrowest unambiguous match wins:
---   1. a single agent in the same window (tab) as this nvim;
---   2. otherwise, a lone agent in the session.
--- Anything ambiguous (2+ candidates) returns nil so the caller shows the picker.
-function M.resolve(list)
+-- Only the agents in nvim's tab, for agent_scope = "tab".
+function M.in_tab(list)
+  return vim.tbl_filter(function(a) return a.same_window end, list)
+end
+
+local function pick_one(list)
   if #list == 1 then return list[1] end
-  local in_window = {}
-  for _, a in ipairs(list) do
-    if a.same_window then table.insert(in_window, a) end
-  end
+  local in_window = M.in_tab(list)
   if #in_window == 1 then return in_window[1] end
-  return nil
+end
+
+-- Resolve the one agent to target without a picker, or nil when it's ambiguous.
+-- Narrowest unambiguous match wins:
+--   1. with a `preferred` program name, the one agent running it (or the one
+--      running it in nvim's tab);
+--   2. a lone agent in the list, or the single agent in nvim's tab.
+-- Anything ambiguous returns nil so the caller shows the picker.
+function M.resolve(list, preferred)
+  if preferred then
+    local matches = vim.tbl_filter(function(a) return a.program == preferred or a.kind == preferred end, list)
+    local a = pick_one(matches)
+    if a then return a end
+  end
+  return pick_one(list)
 end
 
 function M.display(agent)
