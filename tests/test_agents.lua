@@ -1,11 +1,11 @@
 local agents = require("rex-nvim.agents")
 
-local blocks = vim.json.encode({ blocks = {
+local blocks = { blocks = {
   { block_id = "b:self", window_id = "w:1", label = "shell" },
   { block_id = "b:pi", window_id = "w:1", label = "shell" },
   { block_id = "b:claude", window_id = "w:2", label = "review" },
   { block_id = "b:zsh", window_id = "w:2", label = "shell" },
-} })
+} }
 
 local responses = {
   ["b:pi process"] = { foreground = { pid = 1, argv0 = "/usr/local/bin/pi", cwd = "/tmp/proj-a" } },
@@ -19,13 +19,28 @@ local responses = {
   ["b:zsh program_status"] = { records = { { state = "working", app = "cargo", owner = { pid = 99 } } } },
 }
 
-local function fake_exec(code)
-  return function(argv)
-    if code then return { code = code, stdout = "", stderr = "boom" } end
-    if argv[3] == "ls" then return { code = 0, stdout = blocks, stderr = "" } end
-    local resp = responses[argv[5] .. " " .. argv[6]]
-    return { code = resp and 0 or 1, stdout = resp and vim.json.encode(resp) or "", stderr = "" }
+-- A stand-in for rex-nvim.rpc: answers from `blocks` and `responses`, or fails
+-- every call with `fail`.
+local function fake_rpc(fail)
+  local function answer(method, payload)
+    if fail then return nil, fail end
+    if method == "session.list_blocks" then return blocks end
+    local resp = responses[payload.block_id .. " " .. payload.method]
+    if resp then return resp end
+    return nil, "method_not_found"
   end
+  return {
+    call = function(_, method, payload) return answer(method, payload) end,
+    batch = function(_, calls)
+      if fail then return nil, fail end
+      local out = {}
+      for i, c in ipairs(calls) do
+        local r, e = answer(c[1], c[2])
+        out[i] = { result = r, err = e }
+      end
+      return out
+    end,
+  }
 end
 
 local function with_env(env, fn)
@@ -38,7 +53,7 @@ end
 
 T.test("agents: lists agent blocks in the session, skipping our own", function()
   with_env({ REX_SESSION = "s:1", REX_BLOCK = "b:self" }, function()
-    local list, err = agents.list(fake_exec())
+    local list, err = agents.list(fake_rpc())
     T.eq(err, nil)
     T.eq(#list, 2)
     -- sorted by title: "pi" < "review"
@@ -51,7 +66,7 @@ end)
 
 T.test("agents: ignores a status left behind by an earlier program", function()
   with_env({ REX_SESSION = "s:1", REX_BLOCK = "b:self" }, function()
-    for _, a in ipairs(agents.list(fake_exec())) do
+    for _, a in ipairs(agents.list(fake_rpc())) do
       T.ok(a.block_id ~= "b:zsh")
     end
   end)
@@ -59,15 +74,15 @@ end)
 
 T.test("agents: outside a Rex session returns err", function()
   with_env({ REX_SESSION = "" }, function()
-    local list, err = agents.list(fake_exec())
+    local list, err = agents.list(fake_rpc())
     T.eq(list, nil)
     T.ok(err and err:match("REX_SESSION"))
   end)
 end)
 
-T.test("agents: CLI failure returns err", function()
+T.test("agents: server failure returns err", function()
   with_env({ REX_SESSION = "s:1" }, function()
-    local list, err = agents.list(fake_exec(1))
+    local list, err = agents.list(fake_rpc("boom"))
     T.eq(list, nil)
     T.ok(err and err:match("boom"))
   end)

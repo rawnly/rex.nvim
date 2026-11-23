@@ -19,7 +19,7 @@ with file:line and git context.
 
 ## Requirements
 
-nvim ≥ 0.10 · `rex` on PATH · nvim running inside a Rex session
+nvim ≥ 0.10 · nvim running inside a Rex session (`REX_SESSION` and `REX_SERVER` set)
 
 ## Install
 
@@ -64,8 +64,10 @@ to Rex. Sending skips the picker when the target is obvious: the lone agent in
 the session, or the single agent in the same tab as nvim. The picker only
 appears when two or more agents could plausibly be meant.
 
-Text is pasted with `rex send` (as a bracketed paste, so multi-line prompts
-stay in the input box); `submit` then presses Enter with `rex send-key`.
+The plugin talks to the Rex server directly over its control socket
+(`REX_SERVER`) and never spawns the `rex` CLI. Text is sent as a paste event
+(bracketed, so multi-line prompts stay in the input box); `submit` then sends
+an Enter key event. A dropped connection is reopened on the next call.
 
 ## References
 
