@@ -49,12 +49,12 @@ T.test("rpc: no REX_SERVER is an error, not a hang", function()
 end)
 
 -- Against the real server, when there is one.
-if vim.env.REX_SERVER and vim.env.REX_SERVER ~= "" and vim.env.REX_SESSION then
+if vim.env.REX_SERVER and vim.env.REX_SERVER ~= "" and (vim.env.REX_SESSION or vim.env.REX_BLOCK) then
   T.test("rpc: live server answers and lists this session's blocks", function()
     rpc._reset()
     local v = assert(rpc.call(nil, "server.version", nil))
     T.ok(v.api_revision)
-    local s = vim.env.REX_SESSION
+    local s = assert(rpc.session())
     local listed = assert(rpc.call(s, "session.list_blocks", { session_id = s }))
     T.ok(#listed.blocks >= 1)
   end)

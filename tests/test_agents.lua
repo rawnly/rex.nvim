@@ -73,10 +73,27 @@ T.test("agents: ignores a status left behind by an earlier program", function()
 end)
 
 T.test("agents: outside a Rex session returns err", function()
-  with_env({ REX_SESSION = "" }, function()
+  with_env({ REX_SESSION = "", REX_BLOCK = "" }, function()
     local list, err = agents.list(fake_rpc())
     T.eq(list, nil)
     T.ok(err and err:match("REX_SESSION"))
+  end)
+end)
+
+T.test("agents: finds the session from REX_BLOCK when REX_SESSION is unset", function()
+  with_env({ REX_SESSION = "", REX_BLOCK = "b:self" }, function()
+    local rpc = fake_rpc()
+    local call = rpc.call
+    local seen
+    rpc.call = function(s, method, payload)
+      if method == "target.resolve" then
+        return { results = { { status = "resolved", target = { kind = "session", session_id = "s:1" } } } }
+      end
+      seen = s
+      return call(s, method, payload)
+    end
+    T.ok(agents.list(rpc))
+    T.eq(seen, "s:1")
   end)
 end)
 

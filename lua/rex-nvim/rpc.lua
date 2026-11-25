@@ -248,6 +248,25 @@ function M.call(session, method, payload, opts)
   return res[1].result == nil and vim.empty_dict() or res[1].result
 end
 
+-- The Rex session nvim runs in. Servers from API revision 19 export only
+-- REX_BLOCK, so the session is looked up from the block; `rpc` lets tests
+-- pass a fake. Returns session_id or nil, err.
+function M.session(rpc)
+  rpc = rpc or M
+  local s, block = vim.env.REX_SESSION, vim.env.REX_BLOCK
+  if s and s ~= "" then return s end
+  if not block or block == "" then
+    return nil, "not running inside a Rex session (REX_SESSION and REX_BLOCK are unset)"
+  end
+  local res, err = rpc.call(nil, "target.resolve", { kinds = { "session" }, queries = { block } }, { idempotent = true })
+  if not res then return nil, err end
+  local r = res.results and res.results[1]
+  if not r or r.status ~= "resolved" or not r.target or not r.target.session_id then
+    return nil, "cannot find the Rex session of " .. block .. (r and r.reason and r.reason ~= "" and ": " .. r.reason or "")
+  end
+  return r.target.session_id
+end
+
 -- Hang up our side; the server closes its side, as when it restarts.
 function M._drop_for_test()
   if conn then conn.pipe:shutdown() end

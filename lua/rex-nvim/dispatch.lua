@@ -8,7 +8,8 @@ local ENTER = { key = "enter", mods = "", consumed_mods = "", text = "\r", unshi
 function M.send(block_id, text, opts, rpc)
   opts = opts or {}
   rpc = rpc or require("rex-nvim.rpc")
-  local session = vim.env.REX_SESSION
+  local session, serr = require("rex-nvim.rpc").session(rpc)
+  if not session then return false, serr end
   local function event(type, payload)
     return rpc.call(session, "block.event", { session_id = session, block_id = block_id, event = { type = type, payload = payload } })
   end
@@ -24,7 +25,8 @@ end
 -- Moves Rex's focus to the agent's pane (split or floating).
 function M.focus(block_id, rpc)
   rpc = rpc or require("rex-nvim.rpc")
-  local session = vim.env.REX_SESSION
+  local session, serr = require("rex-nvim.rpc").session(rpc)
+  if not session then return false, serr end
   local ok, err = rpc.call(session, "session.focus_block", { session_id = session, block_id = block_id })
   if not ok then return false, "focus failed: " .. err end
   return true

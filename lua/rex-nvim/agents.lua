@@ -21,10 +21,8 @@ end
 -- foreground program is a known agent or reports a status.
 function M.list(rpc)
   rpc = rpc or require("rex-nvim.rpc")
-  local session = vim.env.REX_SESSION
-  if not session or session == "" then
-    return nil, "not running inside a Rex session (REX_SESSION is unset)"
-  end
+  local session, serr = require("rex-nvim.rpc").session(rpc)
+  if not session then return nil, serr end
   local listed, err = rpc.call(session, "session.list_blocks", { session_id = session }, { idempotent = true })
   if not listed then return nil, err end
   local here = vim.env.REX_BLOCK

@@ -75,7 +75,9 @@ function M.start(spec, on_ready, rpc)
   rpc = rpc or require("rex-nvim.rpc")
   local opts, err = M.normalize(spec)
   if not opts then return on_ready(nil, err) end
-  local session, here = vim.env.REX_SESSION, vim.env.REX_BLOCK
+  local session, serr = require("rex-nvim.rpc").session(rpc)
+  if not session then return on_ready(nil, serr) end
+  local here = vim.env.REX_BLOCK or ""
   local name, cwd, r = opts.name, vim.fn.getcwd(), opts.ratio / 100
   local direction, side = unpack(SPLITS[opts.split])
   local me = here ~= "" and rpc.call(session, "block.method", { session_id = session, block_id = here, method = "size" }) or nil
