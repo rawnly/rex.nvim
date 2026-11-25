@@ -110,7 +110,11 @@ local function on_data(c, chunk)
   local frames
   frames, c.buf = M._unframe(c.buf)
   for _, f in ipairs(frames) do
-    if f.opcode == 8 then return kill(c, "server closed the connection") end
+    if f.opcode == 8 then
+      -- Close payload: 2-byte code, then the server's reason (e.g. an API revision mismatch).
+      local reason = #f.data > 2 and f.data:sub(3) or ""
+      return kill(c, "server closed the connection" .. (reason ~= "" and ": " .. reason or ""))
+    end
     if f.opcode == 9 then c.pipe:write(M._frame(10, f.data)) end
     if f.opcode == 1 or f.opcode == 0 then
       c.msg = (f.opcode == 1 and "" or (c.msg or "")) .. f.data
